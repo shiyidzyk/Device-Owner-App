@@ -13,6 +13,7 @@ import android.os.Looper
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
@@ -20,24 +21,40 @@ import com.rosan.dhizuku.api.Dhizuku
 import com.rosan.dhizuku.api.DhizukuRequestPermissionListener
 import rikka.shizuku.Shizuku
 
+/**
+ * 页面结构（单 Activity 程序化 UI，无 XML 布局）：
+ * - 主页：模式/状态 + 两个锁定开关（设备管理员 / Shizuku 直接锁定）+ 两个入口按钮；
+ * - 设置与授权页：Shizuku 状态与授权、一键激活（自动诊断）、Dhizuku 授权、执行输出；
+ * - 使用说明页：三方案说明 + 命令复制。
+ * 所有页面套 ScrollView；系统返回键与页内「← 返回」均回到主页。
+ * 控件引用按页面存在（导航时置空重建），refresh() 对空引用安全，可被任意回调触发。
+ */
 class MainActivity : Activity() {
 
     private lateinit var controller: PolicyController
-    private lateinit var modeText: TextView
-    private lateinit var stateText: TextView
-    private lateinit var lockSwitch: Switch
-    private lateinit var watchSwitch: Switch
-    private lateinit var watchInfoText: TextView
-    private lateinit var grantBtn: Button
-    private lateinit var shizukuText: TextView
-    private lateinit var shizukuGrantBtn: Button
-    private lateinit var shizukuSelfBtn: Button
-    private lateinit var shizukuDhizukuBtn: Button
-    private lateinit var shizukuDiagBtn: Button
-    private lateinit var shizukuAccountsBtn: Button
-    private lateinit var shizukuOut: TextView
+    private lateinit var root: ScrollView
+    private var currentPage = PAGE_HOME
+
+    // —— 主页控件 ——
+    private var modeText: TextView? = null
+    private var stateText: TextView? = null
+    private var lockSwitch: Switch? = null
+    private var watchSwitch: Switch? = null
+    private var watchInfoText: TextView? = null
+    private var setupEntryBtn: Button? = null
+
+    // —— 设置与授权页控件 ——
+    private var shizukuText: TextView? = null
+    private var shizukuGrantBtn: Button? = null
+    private var shizukuSelfBtn: Button? = null
+    private var shizukuDhizukuBtn: Button? = null
+    private var shizukuDiagBtn: Button? = null
+    private var shizukuAccountsBtn: Button? = null
+    private var shizukuOut: TextView? = null
+
     private var uiRefreshed = false
     private var watchStatusText = "尚未查询"
+    private var lastOutput = ""
     /** 诊断链回读的最新 dumpsys 结果（判断阻断条件用） */
     private var lastOwnerDump = ""
     private var lastAccountDump = ""
@@ -72,17 +89,18 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         controller = PolicyController(this)
-        setContentView(buildUi())
+        root = ScrollView(this)
+        setContentView(root)
         Shizuku.addRequestPermissionResultListener(shizukuPermListener)
         // sticky：若 binder 已就绪会立即回调
         Shizuku.addBinderReceivedListenerSticky(shizukuBinderListener)
         Shizuku.addBinderDeadListener(shizukuDeadListener)
-        refresh()
+        navigate(PAGE_HOME)
     }
 
     override fun onResume() {
         super.onResume()
-        if (uiRefreshed) refresh()
+        refresh()
     }
 
     override fun onDestroy() {
@@ -95,23 +113,74 @@ class MainActivity : Activity() {
         }
     }
 
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (currentPage != PAGE_HOME) {
+            navigate(PAGE_HOME)
+        } else {
+            super.onBackPressed()
+        }
+    }
+
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
-    private fun buildUi(): LinearLayout {
+    // =====================================================================
+    // 页面容器与导航
+    // =====================================================================
+
+    private fun navigate(page: String) {
+        currentPage = page
+        modeText = null; stateText = null; lockSwitch = null; watchSwitch = null
+        watchInfoText = null; setupEntryBtn = null
+        shizukuText = null; shizukuGrantBtn = null; shizukuSelfBtn = null
+        shizukuDhizukuBtn = null; shizukuDiagBtn = null; shizukuAccountsBtn = null
+        shizukuOut = null
+        root.removeAllViews()
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(24), dp(20), dp(20))
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
         }
+        root.addView(
+            box,
+            ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+        when (page) {
+            PAGE_SETUP -> buildSetupPage(box)
+            PAGE_HELP -> buildHelpPage(box)
+            else -> buildHomePage(box)
+        }
+        refresh()
+    }
 
+    private fun sectionTitle(parent: LinearLayout, text: String) {
+        parent.addView(TextView(this).apply {
+            this.text = text
+            textSize = 14f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, dp(14), 0, dp(6))
+        })
+    }
+
+    private fun backBtn(parent: LinearLayout) {
+        parent.addView(Button(this).apply {
+            text = "← 返回"
+            setOnClickListener { navigate(PAGE_HOME) }
+        })
+    }
+
+    // =====================================================================
+    // 主页
+    // =====================================================================
+
+    private fun buildHomePage(box: LinearLayout) {
         box.addView(TextView(this).apply {
             text = "🔒 WiFi 锁定工具"
             textSize = 22f
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 0, 0, dp(8))
+            setPadding(0, 0, 0, dp(10))
         })
 
         modeText = TextView(this).apply {
@@ -122,15 +191,21 @@ class MainActivity : Activity() {
 
         stateText = TextView(this).apply {
             textSize = 15f
-            setPadding(0, 0, 0, dp(10))
+            setPadding(0, 0, 0, dp(12))
         }
         box.addView(stateText)
 
+        box.addView(TextView(this).apply {
+            text = "两条锁定路线（按设备情况选择，详见“使用说明”）："
+            textSize = 13f
+            setPadding(0, 0, 0, dp(6))
+        })
+
         lockSwitch = Switch(this).apply {
-            text = "  禁止修改 WiFi（设备管理员限制·持久）"
+            text = "  路线 1 · 设备管理员（系统级灰化，持久）"
             textSize = 16f
         }
-        lockSwitch.setOnCheckedChangeListener { _, checked ->
+        lockSwitch!!.setOnCheckedChangeListener { _, checked ->
             if (!uiRefreshed) return@setOnCheckedChangeListener
             try {
                 controller.setLock(checked)
@@ -143,74 +218,82 @@ class MainActivity : Activity() {
         box.addView(lockSwitch)
 
         watchSwitch = Switch(this).apply {
-            text = "  Shizuku 直接锁定（免管理员·已用过的设备推荐）"
+            text = "  路线 2 · Shizuku 直接锁定（免管理员）"
             textSize = 16f
         }
-        watchSwitch.setOnCheckedChangeListener { _, checked ->
+        watchSwitch!!.setOnCheckedChangeListener { _, checked ->
             if (!uiRefreshed) return@setOnCheckedChangeListener
-            if (checked) {
-                watchOn()
-            } else {
-                watchOff()
-            }
+            if (checked) watchOn() else watchOff()
         }
         box.addView(watchSwitch)
 
         watchInfoText = TextView(this).apply {
             textSize = 12f
             setTextColor(0xFF556655.toInt())
-            setPadding(0, dp(2), 0, dp(8))
+            setPadding(0, dp(2), 0, dp(10))
         }
         box.addView(watchInfoText)
 
-        grantBtn = Button(this).apply {
-            text = "申请 Dhizuku 授权"
-            setOnClickListener { requestDhizuku() }
+        setupEntryBtn = Button(this).apply {
+            text = "⚙️ 设置与授权"
+            setOnClickListener { navigate(PAGE_SETUP) }
         }
-        box.addView(grantBtn)
+        box.addView(setupEntryBtn)
 
-        // ===== Shizuku 区块 =====
-        box.addView(TextView(this).apply {
-            textSize = 14f
-            typeface = Typeface.DEFAULT_BOLD
-            text = "Shizuku（直接锁定 / 诊断 / 可选一键管理员）"
-            setPadding(0, dp(10), 0, dp(4))
+        box.addView(Button(this).apply {
+            text = "📖 使用说明（三选一怎么选）"
+            setOnClickListener { navigate(PAGE_HELP) }
         })
+
+        box.addView(TextView(this).apply {
+            textSize = 12f
+            setTextColor(0xFF888888.toInt())
+            setPadding(0, dp(12), 0, 0)
+            text = "免责声明：仅限自有/已授权设备的合法管理用途。"
+        })
+    }
+
+    // =====================================================================
+    // 设置与授权页
+    // =====================================================================
+
+    private fun buildSetupPage(box: LinearLayout) {
+        backBtn(box)
+
+        sectionTitle(box, "Shizuku（路线 2 的授权来源，也是一键激活的执行者）")
         shizukuText = TextView(this).apply {
             textSize = 13f
             setPadding(0, 0, 0, dp(6))
         }
         box.addView(shizukuText)
-
         shizukuGrantBtn = Button(this).apply {
             text = "申请 Shizuku 授权"
             setOnClickListener { requestShizukuPermission() }
         }
         box.addView(shizukuGrantBtn)
 
+        sectionTitle(box, "一键激活 Device Owner（路线 1，先自动诊断再执行）")
         shizukuSelfBtn = Button(this).apply {
-            text = "Shizuku 一键：本 App 设为 Device Owner（自动先诊断）"
+            text = "Shizuku 一键：本 App 设为 Device Owner"
             setOnClickListener { activateOwner(directCmd.substringAfter("dpm set-device-owner ")) }
         }
         box.addView(shizukuSelfBtn)
-
         shizukuDhizukuBtn = Button(this).apply {
-            text = "Shizuku 一键：Dhizuku 设为 Device Owner（自动先诊断）"
+            text = "Shizuku 一键：Dhizuku 设为 Device Owner"
             setOnClickListener { activateOwner(dhizukuCmd.substringAfter("dpm set-device-owner ")) }
         }
         box.addView(shizukuDhizukuBtn)
-
         shizukuDiagBtn = Button(this).apply {
-            text = "一键诊断（检查激活障碍：已有 Owner / 账户 / 多用户）"
+            text = "一键诊断（已有 Owner / 账户 / 多用户）"
             setOnClickListener {
-                shizukuOut.text = "诊断中…"
+                lastOutput = ""
+                appendOut("诊断中…")
                 diagnoseChain()
             }
         }
         box.addView(shizukuDiagBtn)
-
         shizukuAccountsBtn = Button(this).apply {
-            text = "打开系统账户设置（临时删除 Google 等账户后可重试一键）"
+            text = "打开系统账户设置（临时删除账户后可重试一键）"
             setOnClickListener {
                 try {
                     startActivity(Intent(android.provider.Settings.ACTION_SYNC_SETTINGS))
@@ -221,6 +304,13 @@ class MainActivity : Activity() {
         }
         box.addView(shizukuAccountsBtn)
 
+        sectionTitle(box, "Dhizuku（已由 Dhizuku 托管的设备走这里）")
+        box.addView(Button(this).apply {
+            text = "申请 Dhizuku 授权"
+            setOnClickListener { requestDhizuku() }
+        })
+
+        sectionTitle(box, "执行输出")
         shizukuOut = TextView(this).apply {
             textSize = 12f
             setTextColor(0xFF555555.toInt())
@@ -228,32 +318,39 @@ class MainActivity : Activity() {
             setPadding(0, dp(4), 0, dp(4))
         }
         box.addView(shizukuOut)
+    }
+
+    // =====================================================================
+    // 使用说明页
+    // =====================================================================
+
+    private fun buildHelpPage(box: LinearLayout) {
+        backBtn(box)
 
         box.addView(TextView(this).apply {
             textSize = 13f
-            setPadding(0, dp(14), 0, dp(8))
+            setPadding(0, dp(4), 0, dp(8))
             text = buildString {
                 appendLine("首次使用（按设备状态三选一）：")
                 appendLine()
                 appendLine("方案 0 · Shizuku 直接锁定（推荐·已使用过的设备，无需任何激活）")
-                appendLine("    启动并授权 Shizuku（无线调试/Root），打开上方“Shizuku 直接锁定”")
+                appendLine("    启动并授权 Shizuku（无线调试/Root），回主页打开“路线 2”")
                 appendLine("    原理：由 Shizuku（adb 身份）每 3 秒把 WiFi 强制开回；Shizuku 断线则保护失效，")
                 appendLine("    重新上线时 App 会自动续接。被关闭的 WiFi 最长约 3 秒内恢复，期间有短暂断网。")
                 appendLine()
                 appendLine("方案 1 · Shizuku 一键设为 Device Owner（灰化开关，最持久）：")
-                appendLine("    点击上面的“一键”（内置自动诊断）：若无障碍直接设置成功；")
+                appendLine("    “设置与授权”页点一键（内置自动诊断）：若无障碍直接设置成功；")
                 appendLine("    若被“账户”阻断（已用过的设备最常见），先到系统账户设置临时删除，")
-                appendLine("    点“重试”激活成功后再把账户加回来即可，无需恢复出厂。")
+                appendLine("    一键成功后再把账户加回来即可，无需恢复出厂。")
                 appendLine()
-                appendLine("方案 2 · 电脑 adb（Dhizuku 或本 App 直连）——效果同方案 1：")
+                appendLine("方案 2 · 电脑 adb（与方案 1 同效）：")
                 append("    ").appendLine(dhizukuCmd)
                 append("    ").appendLine(directCmd)
                 append("    ").appendLine("（Dhizuku 命令以 Dhizuku App 内授权页展示的为准）")
                 appendLine()
                 appendLine("效果：方案 1/2 为系统级禁改 WiFi（设置页开关变灰；各系统控制中心/磁贴请实机验证）；")
-                appendLine("方案 0 能覆盖所有关闭途径（含厂商磁贴），但依赖 Shizuku 在线。")
-                appendLine("注意：锁定期间会同时禁止添加/忘记网络（方案 1/2），请先连好常用 WiFi。")
-                appendLine("免责声明：仅限自有/已授权设备的合法管理用途。")
+                appendLine("方案 2 的路线 2（Shizuku 直接锁定）能覆盖所有关闭途径（含厂商磁贴），但依赖 Shizuku 在线。")
+                appendLine("注意：路线 1 上锁会同时禁止添加/忘记网络，请先连好常用 WiFi。")
             }
         })
 
@@ -265,9 +362,11 @@ class MainActivity : Activity() {
             text = "复制直连授权命令"
             setOnClickListener { copy(directCmd) }
         })
-
-        return box
     }
+
+    // =====================================================================
+    // 授权流程
+    // =====================================================================
 
     private fun requestDhizuku() {
         try {
@@ -305,19 +404,19 @@ class MainActivity : Activity() {
         }
     }
 
-    // ------------------------------------------------------------------
+    // =====================================================================
     // Shizuku 直接锁定（看门狗）
-    // ------------------------------------------------------------------
+    // =====================================================================
 
     private fun watchOn() {
         if (!ShizukuClient.granted()) {
-            toast("请先申请 Shizuku 授权")
+            toast("请先在“设置与授权”页申请 Shizuku 授权")
             uiRefreshed = false
-            watchSwitch.isChecked = false
+            watchSwitch?.isChecked = false
             uiRefreshed = true
             return
         }
-        shizukuOut.text = "看门狗启动中…"
+        appendOut("看门狗启动中…")
         ShizukuClient.watchStart(this) { output ->
             val ok = !output.contains("\u0000EX\u0000")
             if (ok) {
@@ -328,10 +427,10 @@ class MainActivity : Activity() {
                 queryWatchStatus()
             } else {
                 uiRefreshed = false
-                watchSwitch.isChecked = false
+                watchSwitch?.isChecked = false
                 uiRefreshed = true
             }
-            shizukuOut.text = "watchLoop →\n$output"
+            appendOut("watchLoop →\n$output")
             refresh()
         }
     }
@@ -342,10 +441,10 @@ class MainActivity : Activity() {
             prefs.edit().putBoolean(WATCH_KEY, false).apply()
             return
         }
-        shizukuOut.text = "看门狗停止中…"
+        appendOut("看门狗停止中…")
         ShizukuClient.watchStop(this) { output ->
             prefs.edit().putBoolean(WATCH_KEY, false).apply()
-            shizukuOut.text = "watchStop →\n$output"
+            appendOut("watchStop →\n$output")
             watchStatusText = "已停止"
             refresh()
         }
@@ -372,12 +471,11 @@ class MainActivity : Activity() {
         }
     }
 
-    // ------------------------------------------------------------------
+    // =====================================================================
     // 诊断链：owner / 账户 / 多用户
-    // ------------------------------------------------------------------
+    // =====================================================================
 
     private fun diagnoseChain(done: (() -> Unit)? = null) {
-        appendOut("\$ 诊断开始")
         ShizukuClient.execCmd(
             this,
             arrayOf("sh", "-c", "dumpsys device_policy | grep -iE 'owner|admin' | head -30")
@@ -414,32 +512,32 @@ class MainActivity : Activity() {
         return buildString {
             appendLine("→ 结论：")
             if (existingOwner) {
-                appendLine("已存在 Device Owner（$ownerLine）：一键必失败；需先移除该 Owner（详他们应用的说明/设备管理设置）。")
+                appendLine("已存在 Device Owner（$ownerLine）：一键必失败；需先移除该 Owner。")
             } else if (accounts > 0) {
                 appendLine("设备上有 $accounts 个账户：dpm set-device-owner 将报 “already some accounts”。")
-                appendLine("处理：临时删除（记住密码），一键成功后再加回来；或直接用“Shizuku 直接锁定”。")
+                appendLine("处理：临时删除（记住密码），一键成功后再加回来；或直接用“路线 2”看门狗。")
             } else if (accounts == 0) {
-                appendLine("无账户：一键激活应可成功（若设备曾预装/管理类 App 或存在多用户仍可能被阻）。")
+                appendLine("无账户：一键激活应可成功（若存在多用户仍可能被阻）。")
             } else {
                 appendLine("账户信息读取失败（Shizuku 离线或系统无账户服务），请检查授权后重试。")
             }
             if (extraUsers) {
                 appendLine("注意：设备存在附加用户，激活可能报 “several users”。")
             }
-            appendLine("提示：一键失败时的系统报错原文会显示在输出里。")
         }
     }
 
-    // ------------------------------------------------------------------
+    // =====================================================================
     // 一键激活（先诊断，无阻断则执行 dpm）
-    // ------------------------------------------------------------------
+    // =====================================================================
 
     private fun activateOwner(adminFlatten: String) {
         if (!ShizukuClient.granted()) {
             toast("请先申请 Shizuku 授权")
             return
         }
-        shizukuOut.text = "激活前自动诊断中…"
+        lastOutput = ""
+        appendOut("激活前自动诊断中…")
         diagnoseChain {
             val ownerLine = Regex("Device owner\\s*:\\s*\\S+").find(lastOwnerDump)?.value
             val existingOwner = ownerLine != null && !ownerLine.endsWith(":")
@@ -463,97 +561,106 @@ class MainActivity : Activity() {
 
     private fun doOwner(adminFlatten: String) {
         try {
-            shizukuOut.text = "正在通过 Shizuku（uid=${ShizukuClient.uid()}）执行…"
+            appendOut("正在通过 Shizuku（uid=${ShizukuClient.uid()}）执行…")
             ShizukuClient.setDeviceOwner(this, adminFlatten) { output, success ->
-                shizukuOut.text = "$ dpm set-device-owner $adminFlatten\n$output"
+                lastOutput = "$ dpm set-device-owner $adminFlatten\n$output"
+                appendOut("")
                 if (success) {
                     toast("Device Owner 设置成功")
                 } else {
-                    toast("设置失败，详见下方输出")
+                    toast("设置失败，详见输出窗")
                 }
-                uiRefreshed = false
                 refresh()
             }
         } catch (t: Throwable) {
-            shizukuOut.text = "执行异常：\n${t.javaClass.simpleName}: ${t.message}"
+            appendOut("执行异常：\n${t.javaClass.simpleName}: ${t.message}")
             toast("执行失败：${t.message}")
         }
     }
 
+    // =====================================================================
+    // 公共
+    // =====================================================================
+
     private fun appendOut(text: String) {
-        shizukuOut.text = "${shizukuOut.text}\n$text".trimStart('\n')
+        lastOutput = if (text.isEmpty()) lastOutput else "${lastOutput}\n$text".trimStart('\n')
+        shizukuOut?.text = lastOutput
     }
 
     private fun refresh() {
         val mode = controller.detectMode()
-        modeText.text = "权限模式：" + when (mode) {
+        val watchIntent = prefs.getBoolean(WATCH_KEY, false)
+        val szInstalled = ShizukuClient.installed(this)
+        val szPing = ShizukuClient.ping()
+        val szGranted = ShizukuClient.granted()
+
+        // —— 主页 ——
+        modeText?.text = "权限模式：" + when (mode) {
             PolicyController.Mode.DIRECT -> "直连 Device Owner（本应用）"
             PolicyController.Mode.DHIZUKU -> "Dhizuku 代理"
             PolicyController.Mode.NONE ->
-                if (controller.dhizukuInstalled()) "未授权（已检测到 Dhizuku，可点下方按钮申请）"
-                else "未授权（无管理员：可用下方 Shizuku 直接锁定，或一键激活）"
+                if (controller.dhizukuInstalled()) "未授权（已检测到 Dhizuku）"
+                else "未授权（无管理员：可用路线 2，或一键激活）"
         }
         val locked = try {
             controller.isLocked()
         } catch (_: Throwable) {
             false
         }
-        val watchIntent = prefs.getBoolean(WATCH_KEY, false)
-        stateText.text = buildString {
+        stateText?.text = buildString {
             append("当前状态：")
             if (mode == PolicyController.Mode.NONE) {
                 if (watchIntent) {
                     append("WiFi 强制开启（Shizuku 看门狗，依赖 Shizuku 在线）")
                 } else {
-                    append("无管理权限，锁定功能不可用")
+                    append("无管理权限，路线 1 不可用")
                 }
             } else {
                 append("WiFi ${if (locked) "🔒 已锁定（开关禁用）" else "未锁定"}")
             }
         }
-
-        // 更新开关前先把监听静默，避免触发 setLock 造成循环
-        uiRefreshed = false
-        lockSwitch.isEnabled = mode != PolicyController.Mode.NONE
-        lockSwitch.isChecked = locked
-        val szGranted = ShizukuClient.granted()
-        watchSwitch.isEnabled = szGranted
-        if (!szGranted) {
-            // Shizuku 离线时保持显示意图，但提示其已然停效
-            watchInfoText.text =
-                "Shizuku 直接锁定依赖 Shizuku 在线；离线期间保护停止。\n$watchStatusText"
-        } else {
-            watchInfoText.text =
-                "轮询间隔约 ${ShizukuClient.WATCH_INTERVAL_MS / 1000} 秒。\n$watchStatusText"
+        lockSwitch?.let { sw ->
+            uiRefreshed = false
+            sw.isEnabled = mode != PolicyController.Mode.NONE
+            sw.isChecked = locked
+            uiRefreshed = true
         }
-        watchSwitch.isChecked = prefs.getBoolean(WATCH_KEY, false)
-        uiRefreshed = true
+        watchSwitch?.let { sw ->
+            uiRefreshed = false
+            sw.isEnabled = szGranted
+            sw.isChecked = watchIntent
+            uiRefreshed = true
+        }
+        watchInfoText?.text =
+            if (szGranted) {
+                "轮询间隔约 ${ShizukuClient.WATCH_INTERVAL_MS / 1000} 秒。\n$watchStatusText"
+            } else {
+                "路线 2 依赖 Shizuku 在线；离线期间保护停止。\n$watchStatusText"
+            }
+        setupEntryBtn?.text = "⚙️ 设置与授权（Shizuku：" + when {
+            !szInstalled -> "未安装"
+            !szPing -> "未启动"
+            !szGranted -> "待授权"
+            else -> "已授权"
+        } + "）"
 
-        grantBtn.visibility = if (mode == PolicyController.Mode.NONE &&
-            controller.dhizukuInstalled()
-        ) Button.VISIBLE else Button.GONE
-
-        // Shizuku 区块状态
-        shizukuText.text = "Shizuku：${ShizukuClient.statusText(this)}"
-        val szInstalled = ShizukuClient.installed(this)
-        val szPing = ShizukuClient.ping()
-        shizukuGrantBtn.visibility =
+        // —— 设置与授权页 ——
+        shizukuText?.text = "Shizuku：${ShizukuClient.statusText(this)}"
+        shizukuGrantBtn?.visibility =
             if (szInstalled && szPing && !szGranted) Button.VISIBLE else Button.GONE
-        val showOwnerBtns = szGranted
-        shizukuSelfBtn.visibility = if (showOwnerBtns) Button.VISIBLE else Button.GONE
-        shizukuDhizukuBtn.visibility =
-            if (showOwnerBtns && controller.dhizukuInstalled()) Button.VISIBLE else Button.GONE
-        shizukuDiagBtn.visibility =
-            if (showOwnerBtns) Button.VISIBLE else Button.GONE
-        shizukuAccountsBtn.visibility =
-            if (showOwnerBtns) Button.VISIBLE else Button.GONE
+        shizukuSelfBtn?.visibility = if (szGranted) Button.VISIBLE else Button.GONE
+        shizukuDhizukuBtn?.visibility =
+            if (szGranted && controller.dhizukuInstalled()) Button.VISIBLE else Button.GONE
+        shizukuDiagBtn?.visibility = if (szGranted) Button.VISIBLE else Button.GONE
+        shizukuAccountsBtn?.visibility = if (szGranted) Button.VISIBLE else Button.GONE
+        shizukuOut?.text = lastOutput.ifBlank { "（暂无输出）" }
     }
 
     private fun copy(text: String) {
         try {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             cm.setPrimaryClip(ClipData.newPlainText("cmd", text))
-            toast("已复制，电脑端执行即可")
+            toast("已复制")
         } catch (t: Throwable) {
             toast("复制失败：${t.message}")
         }
@@ -564,5 +671,8 @@ class MainActivity : Activity() {
 
     companion object {
         private const val WATCH_KEY = "watch_on"
+        private const val PAGE_HOME = "home"
+        private const val PAGE_SETUP = "setup"
+        private const val PAGE_HELP = "help"
     }
 }

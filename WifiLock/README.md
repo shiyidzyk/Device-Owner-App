@@ -37,13 +37,22 @@ gradle assembleDebug
 - `app/src/main/aidl/…/IDevicePolicyManager.aidl` —— Android 15/16 DPM 契约适配（事务码对齐，
   **不要整理/删改**，见移交文档 §7）
 
+## 界面结构（v1.1 起）
+
+- **主页**：权限模式/状态 + 两个锁定开关（路线 1 设备管理员 / 路线 2 Shizuku 直接锁定）
+  + 两个入口按钮（⚙️ 设置与授权、📖 使用说明）。开关联动状态实时显示。
+- **设置与授权页**：Shizuku 状态与授权、一键激活 Device Owner（自动诊断）、
+  Dhizuku 授权、执行输出窗。
+- **使用说明页**：三方案怎么选 + 授权命令复制。
+- 系统返回键或页内「← 返回」回到主页。
+
 ## 首次使用（三选一）
 
 ### 方案 0 · Shizuku 直接锁定（已用过的设备推荐，无需任何激活）
 
 1. 安装并启动 Shizuku（无线调试配对，或 Root 一键启动）；
-2. 本 App 内点「申请 Shizuku 授权」；
-3. 打开「Shizuku 直接锁定」开关 → App 每 3 秒由 Shizuku 把 WiFi 开回
+2. 本 App「设置与授权」页点「申请 Shizuku 授权」；
+3. 回主页打开「路线 2 · Shizuku 直接锁定」开关 → App 每 3 秒由 Shizuku 把 WiFi 开回
    （`cmd wifi set-wifi-enabled enabled`，失败退回 `svc wifi enable`）。
 
 特性与边界：
@@ -55,7 +64,7 @@ gradle assembleDebug
 
 ### 方案 1 · Shizuku 一键设为 Device Owner（灰化开关，最持久）
 
-点「Shizuku 一键：本 App 设为 Device Owner」。**内置自动诊断**：
+点「设置与授权」页的「Shizuku 一键：本 App 设为 Device Owner」。**内置自动诊断**：
 - 先用 shell 检查：已有 Device Owner / 账户数 / 多用户；
 - 无障碍 → 直接执行 `dpm set-device-owner`；
 - 有账户 → 提示先到系统账户设置临时删除（记住密码，激活成功后再加回来），

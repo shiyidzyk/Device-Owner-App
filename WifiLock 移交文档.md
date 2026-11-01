@@ -367,6 +367,26 @@ implementation 'dev.rikka.shizuku:provider:13.1.5'           // 提供 ShizukuPr
   有确认流），shell 直调不可控——维持“引导用户手动删”。
 - **AppOps 屏蔽开关来源**：见 12.2——被 `NETWORK_SETTINGS` 提前放行绕过，不作为锁通道。
 
+### 12.7 UI 二级菜单化（同日追加，versionCode 2 持续）
+
+单页布局在功能变多后按钮被挤出屏幕。已改为**单 Activity 三页面**（程序化 UI，
+无新依赖、无新 Activity 声明）：
+
+- **主页**：模式/状态 + 两个锁定开关（路线 1 管理员 / 路线 2 Shizuku 直接锁定）
+  + 入口按钮（⚙️ 设置与授权 · 📖 使用说明）；
+- **设置与授权页**：Shizuku 状态/授权、两条一键激活、一键诊断、系统账户设置深链、
+  Dhizuku 授权、执行输出窗；
+- **使用说明页**：三方案说明 + 命令复制；
+- 全页面套 `ScrollView`；返回键（`onBackPressed`）与页内「← 返回」均回主页。
+
+实现要点（后续改 UI 必读）：
+- 控件引用**按页面存在**（nullable 字段），`navigate()` 时统一置空重建；
+  `refresh()` 对空引用安全（全部 `?.`/`let`），可被 Shizuku binder 回调在任意页面触发；
+- 输出窗内容存在 `lastOutput` 成员里，页面重建（导航/旋转）后自动恢复显示；
+- `watchOn/watchOff` 不做页面跳转，主页开关操作仅靠 toast + `watchInfoText` 反馈；
+  看门狗启停的命令回显在「设置与授权页」输出窗可随时查看。
+
+
 ---
 
 *本文档由前期开发过程回溯整理；所有外部库 API 语义均以 sources jar / AOSP 官方源码核对过（核对明细见 §6 各条）。
