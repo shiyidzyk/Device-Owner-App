@@ -367,6 +367,51 @@ implementation 'dev.rikka.shizuku:provider:13.1.5'           // 提供 ShizukuPr
   有确认流），shell 直调不可控——维持“引导用户手动删”。
 - **AppOps 屏蔽开关来源**：见 12.2——被 `NETWORK_SETTINGS` 提前放行绕过，不作为锁通道。
 
+## 13. 三阶段迭代（2026-11-01）：限制管理页 + 邮箱远程控制调研
+
+### 13.1 限制管理页（versionCode 3 / versionName 1.2）
+
+主页新增「🧰 限制管理」二级页：五组 22 项企业 MDM 常用用户限制，全部走
+`PolicyController.setRestriction(key, enable)`（三通道分发，与 WiFi 同路）。
+
+| 文件 | 变更 |
+|---|---|
+| `RestrictionCatalog.kt`（新） | 限制清单（key/标题/说明/分组）；条目合法性逐条对照 AOSP `UserRestrictionsUtils`（Device Owner 除 IMMUTABLE_BY_OWNERS 三条外全部可设；未收录那三条，也未收录仅托管资料生效的 OUTGOING_CALLS/SMS） |
+| `PolicyController.kt` | 通用化：`setRestriction/isRestrictionOn/getRestrictions`（整包快照，一次 binder 往返刷整页）；`setLock/isLocked` 变为 DISALLOW_CONFIG_WIFI 的薄包装；新增 `setScreenCaptureDisabled/isScreenCaptureDisabled`（DPM API，非用户限制） |
+| `MainActivity.kt` | 新页面 PAGE_RESTRICTIONS（分组开关 + 每项说明 + 实时状态读取）；主页加入口按钮 |
+
+**本轮实机核对出的 API 事实（后续开发注意）**：
+- 读取截屏禁用态的接口名是 `getScreenCaptureDisabled`（API 36 无 `isScreenCaptureDisabled`；
+  用本机 SDK javap 核对）；
+- `UserManager.DISALLOW_CAMERA` 是隐藏常量（SDK jar 不导出），AOSP 15 原文 `"no_camera"`；
+- **`DISALLOW_MICROPHONE` 已从 Android 15 移除**（连同 `setMicrophoneDisabled` 公开 API），
+  麦克风管控只剩 `DISALLOW_MICROPHONE_TOGGLE`（隐私开关锁定，DO 专属）；
+- Dhizuku+Android15+ 的契约适配范围仍只有 setUserRestriction/getUserRestrictions 两个事务码；
+  其他 DPM API（如 setScreenCaptureDisabled）在该组合下未适配，代码会主动抛提示（不是默默失败）。
+  若将来要支持，需按 §7.4 方法把对应方法纳入事务码对齐的 AIDL 契约。
+
+### 13.2 邮箱指令远程控制（调研结论，未实现）
+
+**结论：技术可行，适合作为无 GMS 环境的“穷人版推送”通道；但受三个硬约束**：
+1. **网络前提**：设备在线才能收信——断网/飞行模式下“远程开 WiFi”类指令天然收不到
+   （指令通道依赖网络可达性，无法自举）；
+2. **后台存活**：Android 后台限制下，稳定轮询必须前台服务（常驻通知）；IMAP IDLE
+   长连接易被 Doze/厂商省电切断，60~120s 轮询 + 前台服务是最稳形态（WorkManager
+   最小 15 分钟周期，只适合低频策略同步）；
+3. **安全面**：邮箱即 C2，凭据与指令合法性是全部安全所在——必须：专用指令邮箱、
+   只认指定发件人 + 共享密钥 HMAC（或 PGP/S/MIME 签名）、指令带时间戳/单调序号防重放、
+   高危指令（wipeData/resetPassword）两步确认（先收命令邮件，再收确认邮件才执行）、
+   执行后回执邮件留痕。
+
+**建议形态（若实装）**：`MailCommandChannel`（前台服务）→ IMAPS(993) 轮询专用邮箱 →
+解析主题 `WF-<cmd>` + 正文 JSON+HMAC → 白名单指令（lock/unlock/restriction/lockNow/
+status/wipe[两步]）→ 调 `PolicyController` 现有通道执行 → 回执邮件。依赖
+`com.sun.mail:android-mail`（JavaMail Android 移植，约 2MB）。
+**并列替代**：自建 HTTP/MQTT 或 ntfy.sh 轮询更实时更轻（邮箱优势仅是“零服务器”）；
+国内无 GMS、FCM 不可用是选邮箱/自建通道的根本原因。
+
+
+
 ### 12.7 UI 二级菜单化（同日追加，versionCode 2 持续）
 
 单页布局在功能变多后按钮被挤出屏幕。已改为**单 Activity 三页面**（程序化 UI，

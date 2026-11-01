@@ -81,6 +81,25 @@ adb shell dpm set-device-owner com.rosan.dhizuku/.server.DhizukuDAReceiver  # Dh
 - 一台设备只能有一个 Device Owner；Dhizuku 需 v2.13.0+（v8 协议）。
 - Dhizuku 模式要求先向 Dhizuku App 申请本应用授权。
 
+## 限制管理（v1.2 新增，企业 MDM 常用清单）
+
+主页「🧰 限制管理」进入：网络 / 应用 / 系统与安全 / 外设与数据 / 硬件与媒体
+五组共 22 项系统级管控（蓝牙配置、热点、飞行模式、装/卸应用、未知来源、
+USB 调试、安全模式、恢复出厂、添加用户、日期时间、USB 文件传输、外部介质
+挂载、跨资料剪贴板、打印、相机、麦克风开关锁定、多媒体、截屏等），全部经
+`addUserRestriction`（截屏为 `setScreenCaptureDisabled`）下发，三种授权通道复用，
+开关状态实时读取自系统，解除即回本页关闭。
+
+- 需要**路线 1**（本 App 或 Dhizuku 为 Device Owner）授权；路线 2（Shizuku 看门狗）
+  仅覆盖 WiFi 强制开回，与本页无关。
+- **Dhizuku + Android 15+**：用户限制读写可用（AIDL 契约已适配），“禁截屏”未适配
+  （该 API 事务码不在契约内），页内会置灰并提示。
+- 条目合法性已逐条对照 AOSP `UserRestrictionsUtils`：Device Owner 可设除
+  `DISALLOW_RECORD_AUDIO / DISALLOW_WALLPAPER / DISALLOW_OEM_UNLOCK` 外的全部限制，
+  本清单不含这三条；`DISALLOW_OUTGOING_CALLS / DISALLOW_SMS` 仅对托管资料生效，亦未收录。
+- “禁相机”使用的 `no_camera` 是隐藏常量（SDK 不导出）；Android 12 起“禁用麦克风”
+  API 已移除，本页提供的是 `DISALLOW_MICROPHONE_TOGGLE`（麦克风隐私开关锁定）。
+
 ## 验证与撤销
 
 - 验证：设置 → WLAN 开关应灰化（路线 1）；路线 0 请关一次 WiFi 观察约 3 秒内自动恢复。

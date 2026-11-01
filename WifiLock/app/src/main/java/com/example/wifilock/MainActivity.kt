@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Typeface
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -51,6 +52,10 @@ class MainActivity : Activity() {
     private var shizukuDiagBtn: Button? = null
     private var shizukuAccountsBtn: Button? = null
     private var shizukuOut: TextView? = null
+
+    // —— 限制管理页控件 ——
+    private var restrictStatusText: TextView? = null
+    private val restrictionSwitches = mutableListOf<Pair<RestrictionCatalog.Item, Switch>>()
 
     private var uiRefreshed = false
     private var watchStatusText = "尚未查询"
@@ -135,6 +140,8 @@ class MainActivity : Activity() {
         shizukuText = null; shizukuGrantBtn = null; shizukuSelfBtn = null
         shizukuDhizukuBtn = null; shizukuDiagBtn = null; shizukuAccountsBtn = null
         shizukuOut = null
+        restrictStatusText = null
+        restrictionSwitches.clear()
         root.removeAllViews()
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -150,6 +157,7 @@ class MainActivity : Activity() {
         when (page) {
             PAGE_SETUP -> buildSetupPage(box)
             PAGE_HELP -> buildHelpPage(box)
+            PAGE_RESTRICTIONS -> buildRestrictionsPage(box)
             else -> buildHomePage(box)
         }
         refresh()
@@ -239,6 +247,11 @@ class MainActivity : Activity() {
             setOnClickListener { navigate(PAGE_SETUP) }
         }
         box.addView(setupEntryBtn)
+
+        box.addView(Button(this).apply {
+            text = "🧰 限制管理（企业 MDM 常用清单）"
+            setOnClickListener { navigate(PAGE_RESTRICTIONS) }
+        })
 
         box.addView(Button(this).apply {
             text = "📖 使用说明（三选一怎么选）"
@@ -361,6 +374,65 @@ class MainActivity : Activity() {
         box.addView(Button(this).apply {
             text = "复制直连授权命令"
             setOnClickListener { copy(directCmd) }
+        })
+    }
+
+    // =====================================================================
+    // 限制管理页（企业 MDM 常用用户限制清单，路线 1 授权后可用）
+    // =====================================================================
+
+    private fun buildRestrictionsPage(box: LinearLayout) {
+        backBtn(box)
+
+        restrictStatusText = TextView(this).apply {
+            textSize = 13f
+            setPadding(0, dp(4), 0, dp(8))
+        }
+        box.addView(restrictStatusText)
+
+        for (section in RestrictionCatalog.sections) {
+            sectionTitle(box, section.title)
+            for (item in section.items) {
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                }
+                val sw = Switch(this).apply {
+                    text = "  ${item.title}"
+                    textSize = 15f
+                    setOnCheckedChangeListener { _, checked ->
+                        if (!uiRefreshed) return@setOnCheckedChangeListener
+                        try {
+                            if (item.special == RestrictionCatalog.SPECIAL_SCREEN_CAPTURE) {
+                                controller.setScreenCaptureDisabled(checked)
+                            } else {
+                                controller.setRestriction(item.key!!, checked)
+                            }
+                            toast(if (checked) "已启用：${item.title}" else "已解除：${item.title}")
+                        } catch (t: Throwable) {
+                            toast("操作失败：${t.message}")
+                        }
+                        refresh()
+                    }
+                }
+                row.addView(sw)
+                row.addView(TextView(this).apply {
+                    text = "    ${item.desc}"
+                    textSize = 11f
+                    setTextColor(0xFF888888.toInt())
+                    setPadding(dp(28), 0, 0, dp(6))
+                })
+                restrictionSwitches.add(item to sw)
+                box.addView(row)
+            }
+        }
+
+        box.addView(TextView(this).apply {
+            textSize = 12f
+            setTextColor(0xFF888888.toInt())
+            setPadding(0, dp(10), 0, 0)
+            text = "说明：以上均为系统级管控，路线 1 授权（本 App 或 Dhizuku 为 Device Owner）后可用；" +
+                "开关状态实时读取自系统，解除时回本页关闭对应开关即可。\n" +
+                "注意：禁恢复出厂/禁相机/禁调试等会显著影响设备可用性，请按需启用。"
         })
     }
 
@@ -654,6 +726,39 @@ class MainActivity : Activity() {
         shizukuDiagBtn?.visibility = if (szGranted) Button.VISIBLE else Button.GONE
         shizukuAccountsBtn?.visibility = if (szGranted) Button.VISIBLE else Button.GONE
         shizukuOut?.text = lastOutput.ifBlank { "（暂无输出）" }
+
+        // —— 限制管理页 ——
+        restrictStatusText?.text = buildString {
+            append("当前授权：")
+            when (mode) {
+                PolicyController.Mode.DIRECT ->
+                    append("直连 Device Owner（全部可用）")
+                PolicyController.Mode.DHIZUKU ->
+                    if (Build.VERSION.SDK_INT >= 35) {
+                        append("Dhizuku 代理（Android 15+：用户限制可用；“禁截屏”契约未适配）")
+                    } else {
+                        append("Dhizuku 代理（全部可用）")
+                    }
+                PolicyController.Mode.NONE ->
+                    append("无管理权限——开关不可用。请先在“设置与授权”完成路线 1 激活")
+            }
+        }
+        if (restrictionSwitches.isNotEmpty()) {
+            val snapshot = controller.getRestrictions()
+            for ((item, sw) in restrictionSwitches) {
+                uiRefreshed = false
+                sw.isEnabled = mode != PolicyController.Mode.NONE &&
+                    !(item.special == RestrictionCatalog.SPECIAL_SCREEN_CAPTURE &&
+                        mode == PolicyController.Mode.DHIZUKU && Build.VERSION.SDK_INT >= 35)
+                sw.isChecked =
+                    if (item.special == RestrictionCatalog.SPECIAL_SCREEN_CAPTURE) {
+                        controller.isScreenCaptureDisabled()
+                    } else {
+                        snapshot?.getBoolean(item.key!!) ?: false
+                    }
+                uiRefreshed = true
+            }
+        }
     }
 
     private fun copy(text: String) {
@@ -674,5 +779,6 @@ class MainActivity : Activity() {
         private const val PAGE_HOME = "home"
         private const val PAGE_SETUP = "setup"
         private const val PAGE_HELP = "help"
+        private const val PAGE_RESTRICTIONS = "restrictions"
     }
 }
