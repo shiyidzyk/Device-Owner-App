@@ -12,3 +12,6 @@ WifiLock/.gradle/
 *.key
 
 # 重置私钥不随 GitHub 发布（本地与备份路径保存，见 WifiLock/tools/README.md）
+
+# 演示示例私钥：有意保留在仓库中展示重置流程；后续本 key 的内容变更不再同步（勿提交新钥，见 WifiLock/tools/README.md）
+!WifiLock/tools/wifilock_reset_private.key
