@@ -527,11 +527,13 @@ status/wipe[两步]）→ 调 `PolicyController` 现有通道执行 → 回执�
 - **每次迭代的固定动作**：本地 commit → `git push origin main` → 有产物变化时打
   tag `v<主.次>` 并建 Release（附件：WifiLock-debug.apk + WifiLock.zip）。
 - **v1.4（versionCode 5）= Release v1.4**，含 APK 与源码 zip。
-- **重置私钥政策（2026-11-01 修订）**：不再随 GitHub 发布——已从跟踪移除（`git rm --cached`），
-  `.gitignore` 忽略 `*.key`（无豁免）；文件本体内容不变，保留在本机，并已手工同步到
-  备份路径 `D:\移动云盘挂载\18725885126\Device Owner App\WifiLock\tools\`。
-  ⚠️ 该文件曾随提交 6663f7a 入库，**历史中仍可取回**；如需彻底清除须重写历史（force push），
-  已向需求方说明。
+- **重置私钥政策（2026-11-01 最终版）**：演示示例私钥**保留在仓库中**（需求方确认：
+  有意随仓库发布，用于演示重置流程）；同时用 `git update-index --skip-worktree` 锁定
+  ——后续本 key 的本地内容变更**不再被同步提交**（仓库恒定保留当前演示版本）。
+  .gitignore 中 `*.key` 全忽略 + 对该文件的显式豁免（两者并存）。
+  文件本体也已手工同步到备份路径 `D:\移动云盘挂载\18725885126\Device Owner App\WifiLock\tools\`。
+  使用者应替换为自己设备的私钥且不要提交真钥（见 tools/README.md）。
+  注意：历史提交 6663f7a→59f2645 之间该文件曾被短暂移除又恢复，当前 HEAD 与后续均保留。
 - **免责声明落位**：根 README、WifiLock/README.md、使用说明.md、App 主页文案四处均有。
 - **开发说明（2026-11-01 追加）**：本项目（2026-11 迭代起）全程由智谱
   （z.ai / zchat.z.ai）的 **GLM-5.3-Flash** 模型完成开发（已在根 README 与

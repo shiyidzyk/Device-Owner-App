@@ -45,7 +45,7 @@
     ├── app/src/main/...                # 主逻辑：PolicyController / ShizukuClient /
     │                                   #   ShellUserService / PinManager / MainActivity 等
     ├── app/src/main/aidl/...           # 精密件：IDevicePolicyManager.aidl（事务码对齐）
-    └── tools/                          # PC 端配套：pin_reset.py / .bat / .vbs（重置私钥不入库）
+    └── tools/                          # PC 端配套：pin_reset.py / .bat / .vbs / 演示示例私钥
 ```
 
 ## 构建
@@ -63,8 +63,9 @@ gradle assembleDebug
 
 ## 应用锁重置私钥
 
-重置私钥**不随仓库发布**（`WifiLock/tools/` 中的 key 文件仅存在于作者本地与备份路径）。
-私钥与设备绑定、由设备标识确定性派生，保存一次长期有效；获取方式、使用与替换步骤见
+仓库中的 `WifiLock/tools/wifilock_reset_private.key` 是**演示示例私钥**（有意保留，
+用于展示离线重置流程）。私钥与设备绑定、由设备标识确定性派生，保存一次长期有效；
+获取方式、使用与替换为你自己私钥的步骤见
 [WifiLock/tools/README.md](WifiLock/tools/README.md)。
 
 ## 免责声明
