@@ -13,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.text.InputType
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -115,7 +116,7 @@ class MainActivity : Activity() {
         // sticky：若 binder 已就绪会立即回调
         Shizuku.addBinderReceivedListenerSticky(shizukuBinderListener)
         Shizuku.addBinderDeadListener(shizukuDeadListener)
-        if (PinManager.isEnabled(this) && !PinManager.isSessionValid(this)) {
+        if (PinManager.isEnabled(this) && !PinManager.isUnlocked()) {
             navigate(PAGE_GATE)
         } else {
             navigate(PAGE_HOME)
@@ -124,8 +125,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // 超时（离开应用 10 分钟以上）后任何入口都要求重新验证
-        if (PinManager.isEnabled(this) && !PinManager.isSessionValid(this) &&
+        // 严格模式：任何离开（切后台/划掉/进程被杀）后重新进入都要求验证
+        if (PinManager.isEnabled(this) && !PinManager.isUnlocked() &&
             currentPage != PAGE_GATE
         ) {
             navigate(PAGE_GATE)
@@ -136,8 +137,10 @@ class MainActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
-        // 离开应用（含划掉后台；进程被杀时该值已持久化，冷启动也能正确判断）
-        PinManager.markBackgrounded(this)
+        // 每次真正离开应用都锁回门禁；旋转屏幕等配置变化不算离开
+        if (!isChangingConfigurations) {
+            PinManager.markLeft()
+        }
     }
 
     override fun onDestroy() {
@@ -172,6 +175,12 @@ class MainActivity : Activity() {
 
     private fun navigate(page: String) {
         currentPage = page
+        // 门禁页禁止截屏/最近任务预览（防止 PIN 位被偷拍）
+        if (page == PAGE_GATE) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
         modeText = null; stateText = null; lockSwitch = null; watchSwitch = null
         watchInfoText = null; setupEntryBtn = null
         shizukuText = null; shizukuGrantBtn = null; shizukuSelfBtn = null
@@ -588,7 +597,7 @@ class MainActivity : Activity() {
                 if (rest > 0) {
                     gateMsg?.text = "错误次数过多，请 ${rest / 1000} 秒后再试"
                 } else if (PinManager.verifyPin(this, gatePin.toString())) {
-                    PinManager.refreshSession(this)
+                    PinManager.markUnlocked()
                     toast("已解锁")
                     navigate(PAGE_HOME)
                     return
@@ -672,7 +681,7 @@ class MainActivity : Activity() {
                             "wifilock_reset_private.key（纯文本，Base64 内容）。\n" +
                             "用途：忘记 PIN 时离线重置；丢失 PIN 且丢失私钥 = 只能恢复出厂。"
                     }
-                    PinManager.refreshSession(this@MainActivity)
+                    PinManager.markUnlocked()
                     refresh()
                     toast("应用锁已启用")
                 }
@@ -702,7 +711,7 @@ class MainActivity : Activity() {
                         return@setOnClickListener
                     }
                     PinManager.setPin(this@MainActivity, n)
-                    PinManager.refreshSession(this@MainActivity)
+                    PinManager.markUnlocked()
                     toast("PIN 已修改（重置私钥不变）")
                     navigate(PAGE_HOME)
                 }

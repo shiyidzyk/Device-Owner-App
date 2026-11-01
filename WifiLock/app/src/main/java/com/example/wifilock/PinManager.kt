@@ -32,7 +32,6 @@ import java.security.spec.X509EncodedKeySpec
 object PinManager {
 
     private const val PREFS = "pin_lock"
-    private const val WINDOW_MS = 10 * 60 * 1000L
     private const val ITERATIONS = 50_000
     private const val CHALLENGE_TTL_MS = 10 * 60 * 1000L
     private const val MAX_WRONG = 5
@@ -59,26 +58,23 @@ object PinManager {
     }
 
     // ------------------------------------------------------------------
-    // 状态与会话窗
+    // 会话状态（v1.4 起改为"严格模式"）：
+    // 只要离开应用（onStop，含切后台/划掉/跳其他 App）就立即失效，
+    // 下次进入必须重新验证；进程被杀同样失效——解锁标志只存内存，
+    // 进程重启即视为未解锁。旋转屏幕等配置变化不算离开（isChangingConfigurations 豁免）。
     // ------------------------------------------------------------------
-    fun isEnabled(ctx: Context): Boolean = p(ctx).getBoolean("enabled", false)
+    private var unlocked = false
 
-    /** 10 分钟免重验窗口：以最近一次离开应用（onStop）的时刻为起点 */
-    fun isSessionValid(ctx: Context): Boolean {
-        val lastPause = p(ctx).getLong("lastPause", 0L)
-        if (lastPause <= 0L) return false
-        val elapsed = System.currentTimeMillis() - lastPause
-        return elapsed in 0 until WINDOW_MS
+    fun isUnlocked(): Boolean = unlocked
+
+    /** 验证通过 / 启用应用锁成功后调用 */
+    fun markUnlocked() {
+        unlocked = true
     }
 
-    /** 离开应用时调用（onStop） */
-    fun markBackgrounded(ctx: Context) {
-        p(ctx).edit().putLong("lastPause", System.currentTimeMillis()).apply()
-    }
-
-    /** 验证通过 / 功能关闭时调用 */
-    fun refreshSession(ctx: Context) {
-        p(ctx).edit().putLong("lastPause", System.currentTimeMillis()).apply()
+    /** 离开应用时调用（onStop 且非配置变化） */
+    fun markLeft() {
+        unlocked = false
     }
 
     /** 距离解锁还剩多少毫秒（0 = 可尝试） */
@@ -91,6 +87,7 @@ object PinManager {
     // ------------------------------------------------------------------
     // 启用 / 验证 / 关闭
     // ------------------------------------------------------------------
+    fun isEnabled(ctx: Context): Boolean = p(ctx).getBoolean("enabled", false)
 
     /**
      * 设置 PIN。返回一次性私钥（PKCS8 Base64，每 64 字符换行便于誊抄）；
@@ -144,9 +141,8 @@ object PinManager {
 
     /** 删除 PIN（重置成功 / 手动关闭共用）：全部状态清空，回到未启用 */
     fun clearPin(ctx: Context) {
-        p(ctx).edit().clear()
-            .putLong("lastPause", System.currentTimeMillis())
-            .apply()
+        unlocked = false
+        p(ctx).edit().clear().apply()
     }
 
     // ------------------------------------------------------------------
