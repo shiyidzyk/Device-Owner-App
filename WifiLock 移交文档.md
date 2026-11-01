@@ -2,7 +2,7 @@
 
 > 文档目的：完整交接本项目的设计思路、实现细节、修复历史与踩坑记录。
 > 本文档只覆盖 WifiLock（WiFi 锁定工具）本项目内容。
-> 交付日期：2026-11-01　构建产物版本：APK 1617 KB（versionCode 1）
+> 交付日期：2026-11-01　构建产物版本：APK 890 KB（versionCode 2，含二阶段「Shizuku 直接锁定」，见 §12）
 
 ---
 
@@ -293,5 +293,83 @@ implementation 'dev.rikka.shizuku:provider:13.1.5'           // 提供 ShizukuPr
 
 ---
 
+## 12. 二阶段迭代记录（2026-11-01，接手后第一次迭代）
+
+### 12.1 需求
+
+上一开发者的 SHIZUKU 模式 = 「用 Shizuku 执行 `dpm set-device-owner`（等效 adb）」，
+在**已使用一段时间**的设备上必然失败（需格式化重过 OOBE 才可能成功）。
+需求方要求：**只靠 Shizuku 授权即可锁定，不做任何管理员/owner 激活**。
+
+### 12.2 先回答“能不能”：无 owner 的持久化 no_config_wifi 在 shell 身份下不可行（源码证据）
+
+接手后先从 AOSP 源码核实了所有可能的 shell 通道，结论如下（保留证据防走回头路）：
+
+| 通道 | 证据（AOSP 源码） | 结论 |
+|---|---|---|
+| `IUserManager.setUserRestriction(key,value,userId)` 直接写基础限制 | `core/java/android/os/IUserManager.aidl` L99 存在该方法；`UserManagerService.java` L3642-3643 首行即 `checkManageUsersPermission` | 实现（L4069-4072）：仅放行 SYSTEM_UID / root / 持 `MANAGE_USERS` 者，**无 shell 特例** |
+| shell uid 是否持 `MANAGE_USERS` | `packages/Shell/AndroidManifest.xml`（android-11.0.0_r1 → master 全部核实）：shell 持 `CREATE_USERS/QUERY_USERS/MANAGE_DEVICE_ADMINS/MANAGE_PROFILE_AND_DEVICE_OWNERS` 等，**无 MANAGE_USERS** | shell 身份（Shizuku）调该 API 必抛 SecurityException |
+| `cmd user` 命令面 | `UserManagerServiceShellCommand.java`：仅 list / 系统用户模式仿真 / 可见性查询 | 无写限制子命令 |
+| DPM 公共 API | 需要 admin 组件且归调用方所有（无 owner 即无 admin） | 不适用 |
+| 「AppOps 屏蔽开关来源」 | `WifiServiceImpl`（AOSP 16）`enforceChangePermission`：**持 `NETWORK_SETTINGS` 权限者提前 return MODE_ALLOWED，跳过 AppOps 检查**；Settings/SystemUI（uid 1000）正是持权者 | 对 Settings/SystemUI 无效，仅能挡 shell 自身，不足以做锁 |
+| DPMS 内部 setup 标志“改回 0”把戏 | `updateUserSetupCompleteAndPaired`：观察器只会 false→true（单调、持久化于 device_policy 状态）；`hasUserSetupCompleted()` 读的是内部状态而非实时 settings | 改 `user_setup_complete/device_provisioned` 为 0 **无效**，勿再尝试 |
+
+### 12.3 一键激活失败的真正门控（同样已核实，指导诊断功能）
+
+`DevicePolicyManagerService.checkDeviceOwnerProvisioningPreConditionLocked`（master 与 android-11.0.0_r45 结构一致）：
+- 调用方为 adb/shell（`isAdb(caller) = isShellUid || isRootUid`，master L18784）时，
+  **setup 已完成本身不是障碍**；
+- 真障碍只有两个：
+  1. `STATUS_ACCOUNTS_NOT_EMPTY`——设备**存在账户**（本应用 admin 非 testOnly ⇒ 任何账户都“不兼容”）；
+  2. `STATUS_NONSYSTEM_USER_EXISTS`——存在非预创建的额外用户（罕见）；
+- 已有 Device Owner / Profile Owner ⇒ `STATUS_HAS_DEVICE_OWNER` / `STATUS_USER_HAS_PROFILE_OWNER`。
+  
+⇒ “已用过的设备”一键失败的根因 = **账户**。解决路径 = 临时删除账户 → 一键 → 激活成功后再加回
+（无需格式化）。testOnly 包标记可绕过账户校验（`isAdminTestOnlyLocked` 分支），
+但有发布/卸载语义副作用，**本轮未采用**，留作后手。
+
+### 12.4 本轮落地（versionCode 2 / versionName 1.1）
+
+新增「Shizuku 直接锁定」（免管理员，覆盖需求）+「一键自动诊断」（把 12.3 的门控做成引导）：
+
+| 文件 | 变更 |
+|---|---|
+| `IShellUserService.aidl` | 追加三个显式编号方法：`watchLoop(long)=2`、`watchStop()=3`、`watchStatus()=4`（`exec=1`/`destroy=16777114` 原样保留；编号规则见 §11.2） |
+| `ShellUserService.kt` | 实现看门狗线程：每 tick 依序尝试 `cmd wifi set-wifi-enabled enabled` → `svc wifi enable`（任一 exit=0 即成功）；`watchStop` 置停并尽力 `pkill -f <pkg>:watchdog` 清理孤儿实例；`watchStatus` 供 App 回读真实状态 |
+| `ShizukuClient.kt` | 双绑定身份：exec 通道 `daemon(false)`（后缀 shizuku，短命）；watchdog 通道 **`daemon(true)`**（后缀 watchdog）——官方 javadoc：daemon 服务在调用方进程死亡后继续运行；Shizuku 重启会杀掉全部 user service，需 App 重新拉起；新增 `execCmd/watchStart/watchStop/watchStatus`；`USER_SERVICE_VERSION` 升到 2 |
+| `MainActivity.kt` | 新增「Shizuku 直接锁定」开关（依赖 Shizuku 在线；关 App 仍生效；Shizuku 重上线自动续接 `tryWatchHeal`）；「一键诊断」按钮（三探针：`dumpsys device_policy` owner 检索 / `dumpsys account` 账户计数 / `pm list users`）+ 结论引导；一键激活改为「先诊断，无阻断才执行」，账户阻断时给出“临时删除→重试→激活后加回”指引并附系统账户设置深链；原两条一键按钮保留 |
+| `app/build.gradle` | versionCode 1→2、versionName 1.0→1.1 |
+
+**看门狗的行为语义（重要）**：
+- 锁定 = Shizuku 持续把 WiFi 开回，**不改系统持久配置**；Shizuku 停止 ⇒ 保护停止；
+- 关闭 WiFi 后最长约 3 秒内被恢复（期间短暂断网，正常）；
+- 好处：**厂商磁贴/快捷中心这类可能不走 no_config_wifi 通道的关闭途径也被覆盖**（拦截的是“结果”而非 UI）；
+- daemon(true) 服务与 Shizuku server 同生共死；App 侧重开 App / Shizuku 上线会自动重挂（幂等）。
+
+**Dhizuku/直连（owner）通道本轮零改动**；二阶段未触碰 `IDevicePolicyManager.aidl`。
+
+### 12.5 待实机验证（接手者清单）
+
+1. **OriginOS 6**：装 Shizuku（无线调试）→ 授权 → 打开「直接锁定」→ 手动关 WiFi，
+   观察约 3 秒内自动恢复；控制中心磁贴同样验证；退出 App 后再关 WiFi，确认仍生效；
+   关 Shizuku → 确认保护停止 → 重开 Shizuku → 确认自动续接。
+2. **一键诊断**：在有 Google 账户的旧设备上跑诊断，确认给出“账户阻断”结论；
+   临时删账户 → 一键 → 成功 → 加回账户 → 路线 1 灰化开关验证（这同时回归验证了 §9.2/9.3 的遗留项）。
+3. **ColorOS 11.1**：同 1（顺带验证 `cmd wifi set-wifi-enabled` 在该机是否存在，应能退回 `svc`）。
+4. 看门狗耗电：观察整机耗电排行（每 3 秒一次子进程，理论可忽略，实测说话）。
+
+### 12.6 本轮排除但值得记录的后手
+
+- **testOnly 包**：manifest `android:testOnly="true"` 可使账户在位时仍能 set-device-owner
+  （`hasIncompatibleAccountsOrNonAdbNoLock` 对 testOnly owner 走账户类型兼容判断）；
+  代价：发布渠道受限、部分设备上存在 owner 清理时序问题——仅当“账户引导” UX 不可接受时再评估。
+- **shell 移除账户自动化**：`AccountManager` 的 removeAccount 需要认证器交互（Google 账户
+  有确认流），shell 直调不可控——维持“引导用户手动删”。
+- **AppOps 屏蔽开关来源**：见 12.2——被 `NETWORK_SETTINGS` 提前放行绕过，不作为锁通道。
+
+---
+
 *本文档由前期开发过程回溯整理；所有外部库 API 语义均以 sources jar / AOSP 官方源码核对过（核对明细见 §6 各条）。
 接手者遇本表未覆盖的报错，优先复现 §7.2 的排查方法（错误文案 → 权威源码 grep → 链逐节点读实现）。*
+
+
