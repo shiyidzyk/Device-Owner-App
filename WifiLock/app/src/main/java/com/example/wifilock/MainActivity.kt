@@ -674,12 +674,14 @@ class MainActivity : Activity() {
                         box.addView(securityOnceKey)
                     }
                     securityOnceKey?.text = if (once.isEmpty()) {
-                        "已启用（沿用既有重置私钥，此前保存的 wifilock_reset_private.key 继续有效）"
+                        "已启用（沿用既有重置私钥）"
                     } else {
-                        "⚠️ 重置私钥（只显示这一次！）：\n\n$once\n\n" +
+                        "⚠️ 重置私钥（设备绑定，只显示这一次！）：\n\n$once\n\n" +
                             "请立即复制保存到电脑 tools/pin_reset.py 同目录的 " +
-                            "wifilock_reset_private.key（纯文本，Base64 内容）。\n" +
-                            "用途：忘记 PIN 时离线重置；丢失 PIN 且丢失私钥 = 只能恢复出厂。"
+                            "wifilock_reset_private.key（纯文本）。\n" +
+                            "它由设备标识派生：之后反复开关应用锁、重装应用、清除数据都不会变；" +
+                            "仅恢复出厂会随系统更换。\n" +
+                            "用途：忘记 PIN 时离线重置。丢失 PIN 且丢失私钥 = 只能恢复出厂。"
                     }
                     PinManager.markUnlocked()
                     refresh()

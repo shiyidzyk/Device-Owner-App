@@ -7,9 +7,11 @@ WifiLock 离线 PIN 重置工具（配合 App「忘记 PIN」功能，全程离�
     pip install cryptography
 
 使用步骤:
-    1. 在 App「🔐 应用锁」里启用 PIN 时，会显示一串"私钥(Base64)"——
-       把它原样保存为 wifilock_reset_private.key（纯文本文件，内容就是那串
-       Base64，换行无影响），放到本脚本同目录。该私钥只显示一次，务必保存！
+    1. 在 App「🔐 应用锁」里启用 PIN 时，会显示一串"重置私钥"——
+       形如 WFLKEY2-<64位hex>（v1.5+，由设备标识派生，重装/清数据后不变）。
+       把它原样保存为 wifilock_reset_private.key（纯文本，换行无影响），
+       放到本脚本同目录。该私钥只显示一次，务必保存！
+       （兼容 v1.4 老格式：Base64 的 PKCS8 私钥文件也能直接用。）
     2. 手机端 App 忘记 PIN 时会显示"申请码"，形如:
            WFL1-1a2b3c4d-0123456789abcdef0123456789abcdef
     3. 运行:
@@ -39,12 +41,16 @@ except ImportError:
 
 
 def load_private_key(path: str):
-    raw = open(path, "r", encoding="utf-8").read()
-    b64 = re.sub(r"\s+", "", raw)
+    raw = re.sub(r"\s+", "", open(path, "r", encoding="utf-8").read())
+    # v2 格式（v1.5+ App 导出）：WFLKEY2-<64位hex 私钥标量>，设备绑定
+    m = re.match(r"^(WFLKEY2-)?([0-9a-fA-F]{64})$", raw)
+    if m:
+        return ec.derive_private_key(int(m.group(2), 16), ec.SECP256R1())
+    # v1 格式（v1.4 老文件兼容）：Base64(PKCS8 DER)
     try:
-        der = base64.b64decode(b64, validate=True)
+        der = base64.b64decode(raw, validate=True)
     except Exception as e:
-        sys.exit(f"私钥文件格式不对（应为 Base64 文本）: {e}")
+        sys.exit(f"私钥文件格式不对（应为 WFLKEY2-<64位hex> 或 Base64）: {e}")
     try:
         return serialization.load_der_private_key(der, password=None)
     except Exception as e:

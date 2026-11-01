@@ -535,6 +535,50 @@ status/wipe[两步]）→ 调 `PolicyController` 现有通道执行 → 回执�
 - 凭证：Windows Git Credential Manager 缓存的 GitHub token（`git credential fill`
   可取，用于 Release 的 REST API 调用）；gh CLI 未安装。
 
+## 18. 六阶段迭代（2026-11-01）：重置私钥改设备绑定（确定性派生）
+
+### 18.1 需求与结论
+
+需求：避免"每次关闭密码重新设置后私钥变更"（用户希望私钥文件长期有效）。
+用户提议用 SN/IMEI 派生——**核实后不可行**：
+- `Build.getSerial()`：API 29+ 需要 `READ_PRIVILEGED_PHONE_STATE`（系统权限），普通应用
+  拿到 "unknown"；
+- `TelephonyManager.getImei()`：API 29+ 起对第三方应用一律拒绝（同样需要系统级权限）；
+- 目标设备（ColorOS 11.1 = Android 11 / OriginOS 6 = Android 16）全部落在限制范围内。
+
+**落地替代**：`Settings.Secure.ANDROID_ID`（SSAID）——应用签名级隔离的设备标识：
+- 对同一应用（同签名、同用户）跨重启/重装/清数据**恒定**；
+- 仅恢复出厂变更——而恢复出厂本身清掉应用全部数据（PIN 哈希也不存在了），
+  届时重新启用生成新钥，语义自洽；
+- **adb 拿不到本应用的 SSAID**：`settings get secure android_id` 返回的是调用方自己
+  （shell）的 SSAID——SSAID 按调用包+签名隔离存储（settings_ssaid.xml，root 才可读），
+  故派生输入对外部攻击者（非 root）不可知。
+
+### 18.2 实现（versionCode 6 / versionName 1.5）
+
+- 派生：`d = HMAC-SHA256(公开常量盐, ANDROID_ID || "WifiLock-reset-key-v1" || counter)`，
+  while 保证 `1 ≤ d < n`；每进程缓存（点乘+自检约几十毫秒）。
+- 公钥点 Q = d·G：**纯 Kotlin P-256 仿射点乘**（BigInteger modP，双倍-加法）；
+  运行时内置 **NIST 2G 自检向量**（2G = 0x7cf27b18..., 0x07775510...，
+  已用 python cryptography 独立核对）——不符直接抛错，绝不给出坏钥。
+  算法另以 python 镜像与 cryptography 交叉验证 5/5 随机标量一致。
+- 公钥不再持久化（spkiDer 按固定模板 + Q 手工拼 X.509 SPKI DER → KeyFactory 生成
+  PublicKey → SHA256withECDSA 验签）——清数据/重装后依然能验签（密钥随设备）。
+- **导出格式 v2**：`WFLKEY2-<64 位 hex 标量>`（App 显示；`clearPin` 后重新设置显示
+  同一把钥）；`pin_reset.py` 同时兼容 v2（hex 标量，`ec.derive_private_key`）与 v1
+  （Base64 PKCS8，老文件）。
+- **迁移（v1.4 → v1.5）**：旧随机公钥记录在下次 `setPin` 时清除并切换为设备派生钥
+  ——老用户需重新保存一次私钥文件（一次性），此后永不再变。
+- 测试：镜像算法 vs cryptography 5/5；2G 向量 ✓；同一 ANDROID_ID 重复生成 =
+  同一标量/同一 key 文件 ✓；v2 格式 e2e（申请码→签名→验签）ALL PASS ✓。
+
+### 18.3 安全边界（如实记录）
+
+- 算法与常量盐随仓库公开，安全性取决于"ANDROID_ID 对外部不可知"（root 读取
+  settings_ssaid.xml 可复现钥——root 攻击者本就可绕过应用锁，不构成额外降级）；
+- 非爆破对抗 4–8 位 PIN 的在线侧仍由指数锁定承担；
+- 离线侧攻击需 2^64 ANDROID_ID 空间的 HMAC 穷举——对本工具威胁模型足够。
+
 ---
 
 *本文档由前期开发过程回溯整理；所有外部库 API 语义均以 sources jar / AOSP 官方源码核对过（核对明细见 §6 各条）。
