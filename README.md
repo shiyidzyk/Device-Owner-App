@@ -45,7 +45,7 @@
     ├── app/src/main/...                # 主逻辑：PolicyController / ShizukuClient /
     │                                   #   ShellUserService / PinManager / MainActivity 等
     ├── app/src/main/aidl/...           # 精密件：IDevicePolicyManager.aidl（事务码对齐）
-    └── tools/                          # PC 端配套：pin_reset.py / .bat / .vbs / 示例私钥
+    └── tools/                          # PC 端配套：pin_reset.py / .bat / .vbs（重置私钥不入库）
 ```
 
 ## 构建
@@ -61,16 +61,22 @@ gradle assembleDebug
 - 注意 `app/src/main/aidl/android/app/admin/IDevicePolicyManager.aidl` 是事务码对齐的
   精简契约，**不要整理格式或删减"用不到"的方法**（详见移交文档 §7）。
 
-## tools 私钥说明（重要）
+## 应用锁重置私钥
 
-`WifiLock/tools/wifilock_reset_private.key` 是**作者设备的重置私钥**，随仓库公开仅作
-演示与测试用途；**使用本项目的用户请替换为自己的私钥，且不要把真私钥提交到公开仓库**。
-用法与替换步骤见 [WifiLock/tools/README.md](WifiLock/tools/README.md)。
+重置私钥**不随仓库发布**（`WifiLock/tools/` 中的 key 文件仅存在于作者本地与备份路径）。
+私钥与设备绑定、由设备标识确定性派生，保存一次长期有效；获取方式、使用与替换步骤见
+[WifiLock/tools/README.md](WifiLock/tools/README.md)。
 
 ## 免责声明
 
 本工具仅限用于**自有或已获合法授权**的设备管理；使用者需遵守当地法律法规，
 因使用本工具产生的任何后果由使用者自行承担。请勿用于未经授权管控他人设备。
+
+## 开发说明
+
+本项目（自 2026-11 迭代起）的全部开发工作——包括功能设计、AOSP 源码考证、
+编码实现、构建与测试——由智谱（[z.ai](https://z.ai) / [zchat.z.ai](https://zchat.z.ai)）
+的 **GLM-5.3-Flash** 模型完成。
 
 ## 许可
 

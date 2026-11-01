@@ -1,4 +1,4 @@
-ï»¿*.apk
+*.apk
 *.aab
 /build
 /.gradle
@@ -11,5 +11,4 @@ WifiLock/.gradle/
 *.zip
 *.key
 
-# ä½œè€…ç¤ºä¾‹ç§é’¥æŒ‰éœ€æ±‚éšä»“åº“å‘å¸ƒï¼ˆç”¨æˆ·æ›¿æ¢ç§é’¥æ—¶å‹¿æäº¤çœŸé’¥ï¼Œè§ WifiLock/tools/README.mdï¼‰
-!WifiLock/tools/wifilock_reset_private.key
+# ÖØÖÃË½Ô¿²»Ëæ GitHub ·¢²¼£¨±¾µØÓë±¸·İÂ·¾¶±£´æ£¬¼û WifiLock/tools/README.md£©
