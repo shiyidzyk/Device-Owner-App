@@ -454,6 +454,29 @@ status/wipe[两步]）→ 调 `PolicyController` 现有通道执行 → 回执�
 - 建议：若要做，直接做「本地通行密钥」解锁（Keystore ES256 + 生物识别 + PIN 兜底），
   不必引入 FIDO2 依赖。
 
+## 15. Windows 侧助手脚本（同日追加：bat + vbs）
+
+交付 `tools/pin_reset.bat`（命令行版）与 `tools/pin_reset_gui.vbs`（图形版），
+包装 pin_reset.py：自动找 Python、缺依赖自动装/提示、粘贴申请码出重置码。
+
+**编码与解析坑（实测，勿重蹈）**：
+- 批处理必须是 **ANSI(GBK) + CRLF**：UTF-8 无 BOM 的中文 bat 在中文系统 cmd 里
+  会被按 GBK 拆行，出现"把注释碎片当命令执行"的诡异报错；`chcp 65001` 前置的
+  民间偏方在本机实测不稳，已弃用（直接 GBK 落盘）。
+- VBS 含中文必须 **UTF-16 LE with BOM**（FF FE）：cscript 只认 ANSI 或 UTF-16，
+  UTF-8 会乱码。构建脚本写完 UTF-8 后统一转 Unicode。
+- **微软商店 python/python3 占位符排在 PATH 最前**：直接 `where python` 找到的是
+  假 python（运行报 "Python was not found"、exit 9009）。两个脚本都用
+  "试运行 `-c \"print(1)\"` 检查退出码"的方式筛选，并在三个 PATH 候选全灭后
+  退回显式路径探测（`%LocalAppData%\Programs\Python\Python*\python.exe`、
+  `%LocalAppData%\Python\bin\python3.exe`、`C:\Python*`、`C:\Program Files\Python3`）。
+- VBScript 的 **`Sub` 是保留字**，不能当变量名（`For Each sub In ...` 直接语法错误）。
+- 测试方式：`set /p` 可从管道读入 → 用管道驱动 bat；vbs 设计了无头模式
+  （带参数时结果走 `WScript.Echo`，仅双击无参时才弹窗）。两个脚本产出的重置码
+  均通过独立 Python 端验签（端到端 ALL PASS）。
+
+
+
 
 
 

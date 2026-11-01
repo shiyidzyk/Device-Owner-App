@@ -126,6 +126,16 @@ USB 调试、安全模式、恢复出厂、添加用户、日期时间、USB 文
 App 用存留公钥验签。签名不可由公钥推出，挑战一次性且限时。
 **丢失 PIN 且丢失私钥 = 只能恢复出厂**（Device Owner 下也无法卸载重装），私钥请妥善保管。
 
+### Windows 助手工具（双击即用，免记命令）
+
+- `tools\pin_reset.bat` —— 命令行版：自动找 Python（含常见安装路径探测，绕过微软商店
+  占位符）、缺 `cryptography` 自动安装，粘贴申请码回车即出重置码；
+- `tools\pin_reset_gui.vbs` —— 图形版：双击 → 对话框粘贴申请码 → 弹窗显示重置码
+  （Ctrl+C 复制）；也支持命令行参数调用（`cscript //nologo pin_reset_gui.vbs <申请码>`，
+  结果走 stdout，便于自动化）；
+- 两者都要求私钥文件 `wifilock_reset_private.key` 与脚本同目录
+  （内容来自 App 启用应用锁时显示的那串“重置私钥”）。
+
 ## 验证与撤销
 
 - 验证：设置 → WLAN 开关应灰化（路线 1）；路线 0 请关一次 WiFi 观察约 3 秒内自动恢复。
