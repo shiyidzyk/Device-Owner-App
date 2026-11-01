@@ -11,8 +11,10 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.text.InputType
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -57,6 +59,19 @@ class MainActivity : Activity() {
     private var restrictStatusText: TextView? = null
     private val restrictionSwitches = mutableListOf<Pair<RestrictionCatalog.Item, Switch>>()
 
+    // —— 应用锁（PIN）门禁与设置页 ——
+    private var gateDots: TextView? = null
+    private var gateMsg: TextView? = null
+    private var gateForgotBtn: Button? = null
+    private var gateCopyChallengeBtn: Button? = null
+    private var gateChallengeText: TextView? = null
+    private var gateResetInput: EditText? = null
+    private var gateResetBtn: Button? = null
+    private var gateMode = "unlock"
+    private val gatePin = StringBuilder()
+    private var securityStatusText: TextView? = null
+    private var securityOnceKey: TextView? = null
+
     private var uiRefreshed = false
     private var watchStatusText = "尚未查询"
     private var lastOutput = ""
@@ -100,12 +115,29 @@ class MainActivity : Activity() {
         // sticky：若 binder 已就绪会立即回调
         Shizuku.addBinderReceivedListenerSticky(shizukuBinderListener)
         Shizuku.addBinderDeadListener(shizukuDeadListener)
-        navigate(PAGE_HOME)
+        if (PinManager.isEnabled(this) && !PinManager.isSessionValid(this)) {
+            navigate(PAGE_GATE)
+        } else {
+            navigate(PAGE_HOME)
+        }
     }
 
     override fun onResume() {
         super.onResume()
+        // 超时（离开应用 10 分钟以上）后任何入口都要求重新验证
+        if (PinManager.isEnabled(this) && !PinManager.isSessionValid(this) &&
+            currentPage != PAGE_GATE
+        ) {
+            navigate(PAGE_GATE)
+            return
+        }
         refresh()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // 离开应用（含划掉后台；进程被杀时该值已持久化，冷启动也能正确判断）
+        PinManager.markBackgrounded(this)
     }
 
     override fun onDestroy() {
@@ -120,6 +152,11 @@ class MainActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        if (currentPage == PAGE_GATE) {
+            // 门禁页不允许返回绕过；退到桌面
+            moveTaskToBack(true)
+            return
+        }
         if (currentPage != PAGE_HOME) {
             navigate(PAGE_HOME)
         } else {
@@ -142,6 +179,11 @@ class MainActivity : Activity() {
         shizukuOut = null
         restrictStatusText = null
         restrictionSwitches.clear()
+        gateDots = null; gateMsg = null; gateForgotBtn = null; gateCopyChallengeBtn = null
+        gateChallengeText = null; gateResetInput = null; gateResetBtn = null
+        gateMode = "unlock"
+        gatePin.clear()
+        securityStatusText = null
         root.removeAllViews()
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -158,6 +200,8 @@ class MainActivity : Activity() {
             PAGE_SETUP -> buildSetupPage(box)
             PAGE_HELP -> buildHelpPage(box)
             PAGE_RESTRICTIONS -> buildRestrictionsPage(box)
+            PAGE_GATE -> buildGatePage(box)
+            PAGE_SECURITY -> buildSecurityPage(box)
             else -> buildHomePage(box)
         }
         refresh()
@@ -251,6 +295,11 @@ class MainActivity : Activity() {
         box.addView(Button(this).apply {
             text = "🧰 限制管理（企业 MDM 常用清单）"
             setOnClickListener { navigate(PAGE_RESTRICTIONS) }
+        })
+
+        box.addView(Button(this).apply {
+            text = "🔐 应用锁（PIN 码）"
+            setOnClickListener { navigate(PAGE_SECURITY) }
         })
 
         box.addView(Button(this).apply {
@@ -434,6 +483,262 @@ class MainActivity : Activity() {
                 "开关状态实时读取自系统，解除时回本页关闭对应开关即可。\n" +
                 "注意：禁恢复出厂/禁相机/禁调试等会显著影响设备可用性，请按需启用。"
         })
+    }
+
+    // =====================================================================
+    // 应用锁门禁页（PIN 键盘 / 忘记 PIN 离线重置）
+    // =====================================================================
+
+    private fun buildGatePage(box: LinearLayout) {
+        box.addView(TextView(this).apply {
+            text = "🔒 应用已锁定"
+            textSize = 20f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, dp(48), 0, dp(10))
+        })
+
+        gateMsg = TextView(this).apply {
+            textSize = 13f
+            setTextColor(0xFFB00020.toInt())
+            setPadding(0, 0, 0, dp(8))
+        }
+        box.addView(gateMsg)
+
+        gateDots = TextView(this).apply {
+            textSize = 22f
+            typeface = Typeface.DEFAULT_BOLD
+            text = dotsText()
+            setPadding(0, 0, 0, dp(14))
+        }
+        box.addView(gateDots)
+
+        val rows = arrayOf(
+            arrayOf("1", "2", "3"),
+            arrayOf("4", "5", "6"),
+            arrayOf("7", "8", "9"),
+            arrayOf("⌫", "0", "✓")
+        )
+        for (row in rows) {
+            val r = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            for (label in row) {
+                r.addView(Button(this).apply {
+                    text = label
+                    textSize = 18f
+                    setOnClickListener { onGateKey(label) }
+                }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            }
+            box.addView(r)
+        }
+
+        gateForgotBtn = Button(this).apply {
+            text = "忘记 PIN？（离线重置）"
+            setOnClickListener { onGateForgot() }
+        }
+        box.addView(gateForgotBtn)
+
+        gateChallengeText = TextView(this).apply {
+            textSize = 13f
+            setTextIsSelectable(true)
+            setPadding(0, dp(8), 0, dp(4))
+            visibility = TextView.GONE
+        }
+        box.addView(gateChallengeText)
+
+        gateCopyChallengeBtn = Button(this).apply {
+            text = "复制申请码"
+            visibility = Button.GONE
+            setOnClickListener { gateChallengeText?.text?.toString()?.let { copy(extractCode(it)) } }
+        }
+        box.addView(gateCopyChallengeBtn)
+
+        gateResetInput = EditText(this).apply {
+            hint = "粘贴 PC 生成的重置码 WFR1-…"
+            inputType = InputType.TYPE_CLASS_TEXT
+            visibility = EditText.GONE
+        }
+        box.addView(gateResetInput)
+
+        gateResetBtn = Button(this).apply {
+            text = "验证重置码并删除 PIN"
+            visibility = Button.GONE
+            setOnClickListener { onGateReset() }
+        }
+        box.addView(gateResetBtn)
+
+        box.addView(TextView(this).apply {
+            textSize = 12f
+            setTextColor(0xFF888888.toInt())
+            setPadding(0, dp(14), 0, 0)
+            text = "重置流程：① 点“忘记 PIN”得到申请码 → ② 电脑上运行 " +
+                "tools/pin_reset.py（需当初启用时保存的私钥）→ ③ 把得到的重置码粘贴到这里。"
+        })
+    }
+
+    private fun extractCode(text: String): String =
+        Regex("WFL1-[0-9a-fA-F]{8}-[0-9a-fA-F]{32}").find(text)?.value ?: text
+
+    private fun dotsText(): String =
+        if (gatePin.isEmpty()) "输入 PIN 码" else "● ".repeat(gatePin.length)
+
+    private fun onGateKey(label: String) {
+        when (label) {
+            "⌫" -> if (gatePin.isNotEmpty()) gatePin.deleteCharAt(gatePin.length - 1)
+            "✓" -> {
+                val rest = PinManager.lockoutRemaining(this)
+                if (rest > 0) {
+                    gateMsg?.text = "错误次数过多，请 ${rest / 1000} 秒后再试"
+                } else if (PinManager.verifyPin(this, gatePin.toString())) {
+                    PinManager.refreshSession(this)
+                    toast("已解锁")
+                    navigate(PAGE_HOME)
+                    return
+                } else {
+                    val r = PinManager.lockoutRemaining(this)
+                    gateMsg?.text = if (r > 0) "错误次数过多，请 ${r / 1000} 秒后再试" else "PIN 不正确"
+                }
+                gatePin.clear()
+            }
+            else -> if (gatePin.length < 8) gatePin.append(label)
+        }
+        gateDots?.text = dotsText()
+    }
+
+    private fun onGateForgot() {
+        gateMode = "reset"
+        gateForgotBtn?.visibility = Button.GONE
+        val code = PinManager.newChallenge(this)
+        gateChallengeText?.visibility = TextView.VISIBLE
+        gateChallengeText?.text = "申请码（10 分钟内有效，一次性）：\n$code"
+        gateCopyChallengeBtn?.visibility = Button.VISIBLE
+        gateResetInput?.visibility = EditText.VISIBLE
+        gateResetBtn?.visibility = Button.VISIBLE
+    }
+
+    private fun onGateReset() {
+        val input = gateResetInput?.text?.toString() ?: ""
+        if (PinManager.verifyResetCode(this, input)) {
+            toast("验证成功：PIN 已删除，请重新设置")
+            navigate(PAGE_SECURITY)
+        } else {
+            toast("重置码无效或已过期（申请码 10 分钟有效且一次性）")
+        }
+    }
+
+    // =====================================================================
+    // 应用锁设置页（启用 / 修改 / 关闭）
+    // =====================================================================
+
+    private fun buildSecurityPage(box: LinearLayout) {
+        backBtn(box)
+
+        securityStatusText = TextView(this).apply {
+            textSize = 14f
+            setPadding(0, dp(4), 0, dp(10))
+        }
+        box.addView(securityStatusText)
+
+        if (!PinManager.isEnabled(this)) {
+            sectionTitle(box, "设置 PIN 码（4–8 位数字）")
+            val et1 = numberField("新 PIN")
+            val et2 = numberField("确认新 PIN")
+            box.addView(et1)
+            box.addView(et2)
+            box.addView(Button(this).apply {
+                text = "启用应用锁"
+                setOnClickListener {
+                    val a = et1.text.toString()
+                    if (!a.matches(Regex("\\d{4,8}"))) {
+                        toast("PIN 须为 4–8 位数字")
+                        return@setOnClickListener
+                    }
+                    if (a != et2.text.toString()) {
+                        toast("两次输入不一致")
+                        return@setOnClickListener
+                    }
+                    val once = PinManager.setPin(this@MainActivity, a)
+                    if (securityOnceKey == null) {
+                        securityOnceKey = TextView(this@MainActivity).apply {
+                            textSize = 12f
+                            setTextIsSelectable(true)
+                            setPadding(0, dp(10), 0, 0)
+                        }
+                        box.addView(securityOnceKey)
+                    }
+                    securityOnceKey?.text = if (once.isEmpty()) {
+                        "已启用（沿用既有重置私钥，此前保存的 wifilock_reset_private.key 继续有效）"
+                    } else {
+                        "⚠️ 重置私钥（只显示这一次！）：\n\n$once\n\n" +
+                            "请立即复制保存到电脑 tools/pin_reset.py 同目录的 " +
+                            "wifilock_reset_private.key（纯文本，Base64 内容）。\n" +
+                            "用途：忘记 PIN 时离线重置；丢失 PIN 且丢失私钥 = 只能恢复出厂。"
+                    }
+                    PinManager.refreshSession(this@MainActivity)
+                    refresh()
+                    toast("应用锁已启用")
+                }
+            })
+        } else {
+            sectionTitle(box, "修改 PIN")
+            val etCur = numberField("当前 PIN")
+            val etNew = numberField("新 PIN（4–8 位数字）")
+            val etNew2 = numberField("确认新 PIN")
+            box.addView(etCur)
+            box.addView(etNew)
+            box.addView(etNew2)
+            box.addView(Button(this).apply {
+                text = "确认修改"
+                setOnClickListener {
+                    if (!PinManager.verifyPin(this@MainActivity, etCur.text.toString())) {
+                        toast("当前 PIN 不正确")
+                        return@setOnClickListener
+                    }
+                    val n = etNew.text.toString()
+                    if (!n.matches(Regex("\\d{4,8}"))) {
+                        toast("新 PIN 须为 4–8 位数字")
+                        return@setOnClickListener
+                    }
+                    if (n != etNew2.text.toString()) {
+                        toast("两次输入不一致")
+                        return@setOnClickListener
+                    }
+                    PinManager.setPin(this@MainActivity, n)
+                    PinManager.refreshSession(this@MainActivity)
+                    toast("PIN 已修改（重置私钥不变）")
+                    navigate(PAGE_HOME)
+                }
+            })
+
+            sectionTitle(box, "关闭应用锁")
+            val etOff = numberField("当前 PIN")
+            box.addView(etOff)
+            box.addView(Button(this).apply {
+                text = "关闭应用锁"
+                setOnClickListener {
+                    if (!PinManager.verifyPin(this@MainActivity, etOff.text.toString())) {
+                        toast("PIN 不正确")
+                        return@setOnClickListener
+                    }
+                    PinManager.clearPin(this@MainActivity)
+                    toast("应用锁已关闭（重置私钥已一并清除）")
+                    navigate(PAGE_HOME)
+                }
+            })
+
+            box.addView(TextView(this).apply {
+                textSize = 12f
+                setTextColor(0xFF666666.toInt())
+                setPadding(0, dp(12), 0, 0)
+                text = "规则：离开应用（划后台/进程被杀）后 10 分钟内重进免验证，超时重验；" +
+                    "连续错 5 次进入指数锁定（30s 起）。\n" +
+                    "忘记 PIN：锁定页“忘记 PIN”→ 申请码 → 电脑 tools/pin_reset.py 生成重置码 → " +
+                    "回 App 验证，通过即删除 PIN（全程离线）。"
+            })
+        }
+    }
+
+    private fun numberField(hint: String): EditText = EditText(this).apply {
+        this.hint = hint
+        inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
     }
 
     // =====================================================================
@@ -759,6 +1064,14 @@ class MainActivity : Activity() {
                 uiRefreshed = true
             }
         }
+
+        // —— 应用锁设置页 ——
+        securityStatusText?.text = if (PinManager.isEnabled(this)) {
+            "状态：已启用（离开应用 10 分钟内重进免验证）"
+        } else {
+            "状态：未启用。启用后进入应用（或超时重进）需输入 PIN；" +
+                "忘记 PIN 可用电脑脚本 tools/pin_reset.py 离线重置。"
+        }
     }
 
     private fun copy(text: String) {
@@ -780,5 +1093,7 @@ class MainActivity : Activity() {
         private const val PAGE_SETUP = "setup"
         private const val PAGE_HELP = "help"
         private const val PAGE_RESTRICTIONS = "restrictions"
+        private const val PAGE_GATE = "gate"
+        private const val PAGE_SECURITY = "security"
     }
 }
