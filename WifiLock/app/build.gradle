@@ -1,0 +1,45 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.example.wifilock'
+    compileSdk 36   // 编译符号与 targetSdk 34 保持保守；OriginOS 6（Android 16）兼容运行
+    defaultConfig {
+        applicationId "com.example.wifilock"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    buildFeatures {
+        aidl = true   // Android 15/16 代理 DPM 需要 IDevicePolicyManager 的 AIDL 契约
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+dependencies {
+    // Dhizuku 客户端 API（MavenCentral 官方发布，与最新 Dhizuku 服务端协议对齐）
+    implementation 'io.github.iamr0s:Dhizuku-API:2.7.0'
+    // Dhizuku 代理 DPM 需要反射 DevicePolicyManager.mService（隐藏字段，Android 9+ 受限）。
+    // 6.2 是 LSPosed 最新版（Android 16 官方文档推荐版本；AAR 元数据要求 compileSdk 37，
+    // 由下方禁用 AarMetadata 检查任务豁免——库本身运行时不依赖 API 37 符号）
+    implementation 'org.lsposed.hiddenapibypass:hiddenapibypass:6.2'
+    // Shizuku：App 内一键执行 dpm set-device-owner（等效 adb，无需电脑）。
+    // api 提供客户端 API；provider 提供 ShizukuProvider（server 向 app 传递 binder 的载体）。
+    implementation 'dev.rikka.shizuku:api:13.1.5'
+    implementation 'dev.rikka.shizuku:provider:13.1.5'
+}
+
+// HiddenApiBypass 6.2 的 AAR 元数据要求 compileSdk 37，
+// 但该库运行时并不依赖 API 37 符号——对本应用无实际限制，禁用此检查任务。
+tasks.matching { it.name.endsWith('AarMetadata') }.configureEach {
+    enabled = false
+}

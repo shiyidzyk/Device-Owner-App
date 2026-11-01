@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">WiFi 锁</string>
+    <string name="admin_desc">在设备所有者模式下设置 WiFi 用户限制</string>
+</resources>
