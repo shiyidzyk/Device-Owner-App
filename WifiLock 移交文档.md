@@ -520,6 +520,21 @@ status/wipe[两步]）→ 调 `PolicyController` 现有通道执行 → 回执�
 - 如日后需要"可配置时长"，把内存标志换成 (离开时刻 + N 分钟) 判断即可（v1.3 的
   lastPause 方案可复用，注意时钟回拨）。
 
+## 17. GitHub 发布与同步约定（2026-11-01 起）
+
+- **仓库**：https://github.com/shiyidzyk/Device-Owner-App （public，MIT License）；
+  默认分支 `main`（已由 master 切换；旧 master 指针已删除，两分支当时内容一致）。
+- **每次迭代的固定动作**：本地 commit → `git push origin main` → 有产物变化时打
+  tag `v<主.次>` 并建 Release（附件：WifiLock-debug.apk + WifiLock.zip）。
+- **v1.4（versionCode 5）= Release v1.4**，含 APK 与源码 zip。
+- **示例私钥已按需求入库**（`WifiLock/tools/wifilock_reset_private.key`，.gitignore
+  中有显式豁免）：这是作者设备的重置私钥，作者知情决定随公开仓库发布作演示用；
+  使用者应替换为自己的私钥且**不要提交真钥**（替换说明见 `WifiLock/tools/README.md`
+  与根 README）。
+- **免责声明落位**：根 README、WifiLock/README.md、使用说明.md、App 主页文案四处均有。
+- 凭证：Windows Git Credential Manager 缓存的 GitHub token（`git credential fill`
+  可取，用于 Release 的 REST API 调用）；gh CLI 未安装。
+
 ---
 
 *本文档由前期开发过程回溯整理；所有外部库 API 语义均以 sources jar / AOSP 官方源码核对过（核对明细见 §6 各条）。

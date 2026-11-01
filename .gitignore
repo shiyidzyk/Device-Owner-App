@@ -10,3 +10,6 @@ local.properties
 WifiLock/.gradle/
 *.zip
 *.key
+
+# 作者示例私钥按需求随仓库发布（用户替换私钥时勿提交真钥，见 WifiLock/tools/README.md）
+!WifiLock/tools/wifilock_reset_private.key
