@@ -268,6 +268,21 @@ class MainActivity : Activity() {
         }
         lockSwitch!!.setOnCheckedChangeListener { _, checked ->
             if (!uiRefreshed) return@setOnCheckedChangeListener
+            if (checked) {
+                // 路线互斥：路线 2 开关意图仍开启时
+                if (prefs.getBoolean(WATCH_KEY, false)) {
+                    if (ShizukuClient.granted()) {
+                        toast("路线需二选一：若需更改，请先关闭已开启的路线 2")
+                        uiRefreshed = false
+                        lockSwitch?.isChecked = false
+                        uiRefreshed = true
+                        return@setOnCheckedChangeListener
+                    }
+                    // 路线 2 因 Shizuku 离线已失效：自动清掉其开关意图，避免死锁
+                    prefs.edit().putBoolean(WATCH_KEY, false).apply()
+                    toast("路线 2 因 Shizuku 离线已失效，已自动关闭其开关")
+                }
+            }
             try {
                 controller.setLock(checked)
                 toast(if (checked) "已上锁：WiFi 开关已被禁用" else "已解锁")
@@ -796,7 +811,22 @@ class MainActivity : Activity() {
     // Shizuku 直接锁定（看门狗）
     // =====================================================================
 
+    /** 路线 1 是否处于生效中（有管理权 && no_config_wifi 限制已设置） */
+    private fun route1Active(): Boolean = try {
+        controller.detectMode() != PolicyController.Mode.NONE && controller.isLocked()
+    } catch (_: Throwable) {
+        false
+    }
+
     private fun watchOn() {
+        // 路线互斥：路线 1 生效中（no_config_wifi 已由管理权设置）
+        if (route1Active()) {
+            toast("路线需二选一：若需更改，请先关闭已开启的路线 1")
+            uiRefreshed = false
+            watchSwitch?.isChecked = false
+            uiRefreshed = true
+            return
+        }
         if (!ShizukuClient.granted()) {
             toast("请先在“设置与授权”页申请 Shizuku 授权")
             uiRefreshed = false
@@ -852,6 +882,8 @@ class MainActivity : Activity() {
     /** Shizuku 恰好上线时的自动续接（服务端 daemon 服务会随 Shizuku 死亡） */
     private fun tryWatchHeal() {
         if (prefs.getBoolean(WATCH_KEY, false) && ShizukuClient.granted()) {
+            // 路线互斥：路线 1 生效中（如经 adb 外部设置）不续接
+            if (route1Active()) return
             ShizukuClient.watchStart(this) { output ->
                 watchStatusText = "自动续接 → $output"
                 refresh()

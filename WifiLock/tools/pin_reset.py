@@ -41,16 +41,20 @@ except ImportError:
 
 
 def load_private_key(path: str):
-    raw = re.sub(r"\s+", "", open(path, "r", encoding="utf-8").read())
-    # v2 格式（v1.5+ App 导出）：WFLKEY2-<64位hex 私钥标量>，设备绑定
-    m = re.match(r"^(WFLKEY2-)?([0-9a-fA-F]{64})$", raw)
+    # utf-8-sig：自动吞掉记事本"UTF-8 with BOM"的 BOM 头
+    raw = open(path, "r", encoding="utf-8-sig").read()
+    clean = re.sub(r"\s+", "", raw)
+    # v2 格式（v1.5+ App 导出）：WFLKEY2-<64位hex 私钥标量>，设备绑定。
+    # 用 search 而非 match：兼容文件里误粘贴了旧钥/说明文字的混合内容。
+    m = re.search(r"WFLKEY2-([0-9a-fA-F]{64})", clean)
     if m:
-        return ec.derive_private_key(int(m.group(2), 16), ec.SECP256R1())
+        return ec.derive_private_key(int(m.group(1), 16), ec.SECP256R1())
     # v1 格式（v1.4 老文件兼容）：Base64(PKCS8 DER)
     try:
-        der = base64.b64decode(raw, validate=True)
+        der = base64.b64decode(clean, validate=True)
     except Exception as e:
-        sys.exit(f"私钥文件格式不对（应为 WFLKEY2-<64位hex> 或 Base64）: {e}")
+        sys.exit(f"私钥文件格式不对（应为 WFLKEY2-<64位hex> 或 Base64；"
+                 f"也请确认本脚本是仓库最新版）: {e}")
     try:
         return serialization.load_der_private_key(der, password=None)
     except Exception as e:
