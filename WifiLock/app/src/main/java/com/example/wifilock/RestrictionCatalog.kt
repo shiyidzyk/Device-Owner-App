@@ -30,7 +30,18 @@ object RestrictionCatalog {
 
     val sections: List<Section> = listOf(
         Section("网络", listOf(
-            Item(UserManager.DISALLOW_CONFIG_BLUETOOTH, "禁蓝牙配置", "设置内蓝牙开关不可改"),
+            // DISALLOW_CONFIG_BLUETOOTH：界面级（设置 App 自觉灰化）。
+            // 控制中心不检查用户限制（SystemUI 快速磁贴从不读限制，原生 AOSP 亦然），
+            // 要彻底锁死请用下一项 DISALLOW_BLUETOOTH（服务级）。
+            Item(UserManager.DISALLOW_CONFIG_BLUETOOTH, "禁蓝牙配置（界面级）",
+                "设置内蓝牙开关/配对不可改。注意：只对“设置”界面生效，控制中心仍可能绕过；要彻底锁死用「蓝牙锁定（服务级冻结）」"),
+            // DISALLOW_BLUETOOTH = "no_bluetooth"：AOSP 公开常量（Android 14 起标记弃用，功能仍在），
+            // 属 PRIMARY_USER_ONLY 集合——Device Owner 设置后由 BluetoothManagerService 强制：
+            // enable()/disable() 均被直接拒绝（R 源码 BluetoothManagerService 1054/1088 行，
+            // isBluetoothDisallowed() 检查的是用户限制而非调用方），与哪块界面发起无关——
+            // 控制中心切换等于没切。注意双向冻结：开启时蓝牙若正开着会冻在“开”。
+            Item(UserManager.DISALLOW_BLUETOOTH, "蓝牙锁定（服务级冻结）",
+                "蓝牙状态整体冻结：设置/控制中心/任何开关都改不动。⚠️ 开启时蓝牙若正开着，会冻在“开”——想保持关请先关掉蓝牙再启用"),
             Item(UserManager.DISALLOW_CONFIG_TETHERING, "禁网络共享", "USB/蓝牙共享设置不可改"),
             Item(UserManager.DISALLOW_WIFI_TETHERING, "禁 Wi-Fi 热点", "热点开关不可用"),
             Item(UserManager.DISALLOW_AIRPLANE_MODE, "禁飞行模式", "快捷磁贴/设置不可开飞行模式"),
@@ -39,7 +50,13 @@ object RestrictionCatalog {
         )),
         Section("应用", listOf(
             Item(UserManager.DISALLOW_INSTALL_APPS, "禁安装应用", "无法安装任何新应用"),
-            Item(UserManager.DISALLOW_UNINSTALL_APPS, "禁卸载应用", "已装应用不可卸载"),
+            // PMS.deletePackageAsUser 对该限制统一拒绝（DELETE_FAILED_USER_RESTRICTED，
+            // R 源码 PackageManagerService 18169 行）；isUserRestricted 检查的是目标用户的
+            // 限制而非调用方身份——因此连 `adb shell pm uninstall`（shell 权限）都会失败，
+            // 仅 root 可绕过。同限制还令普通调用方的“停用/挂起应用”被拒
+            // （PMS isSuspendAllowedForUser 同步检查 DISALLOW_UNINSTALL_APPS）。
+            Item(UserManager.DISALLOW_UNINSTALL_APPS, "防卸载（禁止卸载应用）",
+                "所有已装应用不可卸载/停用（含本应用与 Dhizuku）。系统在包管理器层面直接拦截，连 adb uninstall 也会失败；想卸载任何应用前先关闭本项"),
             Item(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES, "禁未知来源", "无法从侧载渠道安装应用")
         )),
         Section("系统与安全", listOf(

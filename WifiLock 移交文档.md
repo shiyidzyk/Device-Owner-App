@@ -578,6 +578,13 @@ status/wipe[两步]）→ 调 `PolicyController` 现有通道执行 → 回执�
 - 测试：镜像算法 vs cryptography 5/5；2G 向量 ✓；同一 ANDROID_ID 重复生成 =
   同一标量/同一 key 文件 ✓；v2 格式 e2e（申请码→签名→验签）ALL PASS ✓。
 
+### 18.3 安全边界（如实记录）
+
+- 算法与常量盐随仓库公开，安全性取决于"ANDROID_ID 对外部不可知"（root 读取
+  settings_ssaid.xml 可复现钥——root 攻击者本就可绕过应用锁，不构成额外降级）；
+- 非爆破对抗 4–8 位 PIN 的在线侧仍由指数锁定承担；
+- 离线侧攻击需 2^64 ANDROID_ID 空间的 HMAC 穷举——对本工具威胁模型足够。
+
 ## 19. 七阶段迭代（2026-11-01）：脚本健壮性 + 路线互斥（versionCode 7 / versionName 1.6）
 
 ### 19.1 重置脚本对 v2 私钥的兼容性修复
@@ -604,18 +611,88 @@ status/wipe[两步]）→ 调 `PolicyController` 现有通道执行 → 回执�
 - 自动续接（tryWatchHeal）同样尊重互斥（路线 1 生效中不续接；覆盖经 adb 外部
   设置限制的边界）。
 
+---
 
+## 20. 第八阶段迭代（2026-11-01）：蓝牙服务级冻结 + 防卸载语义升级（versionCode 8 / versionName 1.7）
 
-### 18.3 安全边界（如实记录）
+### 20.1 背景（需求方实测：realme UI 2.0 / Android 11，Dhizuku 经 AOSP 测试签名激活成功）
 
-- 算法与常量盐随仓库公开，安全性取决于"ANDROID_ID 对外部不可知"（root 读取
-  settings_ssaid.xml 可复现钥——root 攻击者本就可绕过应用锁，不构成额外降级）；
-- 非爆破对抗 4–8 位 PIN 的在线侧仍由指数锁定承担；
-- 离线侧攻击需 2^64 ANDROID_ID 空间的 HMAC 穷举——对本工具威胁模型足够。
+需求方用「Dhizuku + AOSP 测试签名」方式完成 Device Owner 激活，限制经 Dhizuku 代理
+生效；随后发现：WiFi/蓝牙等仍可在**下拉控制中心**直接开关，询问能否解决；同时要求
+加「防卸载开关」（MDM 内）。
+
+### 20.2 控制中心绕过限制——AOSP R 源码结论（aosp-mirror platform_frameworks_base @ android-11.0.0_r1）
+
+- **SystemUI 快速磁贴从不检查用户限制**：`packages/SystemUI/.../qs/tiles/WifiTile.java`
+  handleClick（115–121 行）直接 `mController.setWifiEnabled(!wifiEnabled)`；
+  `BluetoothTile.java` handleClick（85–90 行）直接 `mController.setBluetoothEnabled(!isEnabled)`；
+  两处均无 DISALLOW/hasUserRestriction 检查。→ 原生 AOSP 亦绕过；ColorOS/realmeUI
+  深度定制面板同理。设置 App 的灰化是「设置自己读限制」的行为。
+- **WiFi 服务层无限制拦截**：`packages/modules/Wifi/.../WifiServiceImpl`
+  `setWifiEnabled`（890–915 行）只查调用方权限（uid/权限/飞行模式/SoftAp），无任何
+  用户限制检查；`no_config_wifi` 在 WiFi 服务内的唯一落点是 `factoryReset`
+  （若以 Android 12 基线 lineage-19.0 �SearchTree核对，R 同构），**不管开关状态改动**。
+  → **WiFi 无法在服务层锁死，“保持状态”只能靠看门狗改回**（本工具路线 2 已有）。
+- **蓝牙例外：`no_bluetooth` 是服务级强制**：`services/core/java/com/android/server/
+  BluetoothManagerService.java` 的 `isBluetoothDisallowed()`（2546–2550 行）检查
+  `UserManager.DISALLOW_BLUETOOTH, UserHandle.SYSTEM`；`enable()`（1054 行）、
+  `disable()`（1088 行）、`enableNoAutoConnect`（1027 行）、BLE（857/883/913 行）与
+  重启路径（1320 行）全部拒绝。**与调用方/界面无关**——控制中心切了等于没切。
+  - 合法性：`UserRestrictionsUtils`（R）`PRIMARY_USER_ONLY_RESTRICTIONS` 含
+    `DISALLOW_BLUETOOTH`（153–154 行）——Device Owner 可设，设后应用于本用户；
+    Dhizuku（DO）经 setUserRestriction 代理可设（既有契约 134 事务码）。
+  - 公开性：`UserManager.DISALLOW_BLUETOOTH` 为 AOSP 公开常量（"no_bluetooth"，
+    API 21+；Android 14 起仅标记弃用，R/S/T/U 服务层仍在用）；SDK 头文件存在，可编译。
+  - **双向冻结语义**（重要）：`disable()` 同样被 1088 行拦——开启限制时蓝牙若开着
+    → 冻在"开"；想保持"关"必须先关蓝牙再上锁。UI 以红字描述提示。
+- 附：R 的 svc 存在 `svc bluetooth enable|disable`（`cmds/svc/.../BluetoothCommand.java`
+  经 BluetoothAdapter → BluetoothManagerService，同样被 no_bluetooth 拦）；
+  `cmd bluetooth_manager` 在 R **不存在**（服务未实现 ShellCommand，S 才有
+  BluetoothShellCommand）——仅供后续版本升级时参考。
+- **互斥决策**：需求方明确选择「**维持互斥不变**」（v1.6 规则原样保留）与「蓝牙
+  **只要限制冻结**」（不做 `svc bluetooth` 看门狗扩展）。WiFi 控制中心绕过如实写进
+  文档（平台现状），解决途径=路线 2 看门狗（需先关路线 1）。
+
+### 20.3 防卸载——人工智能核实链（R PackageManagerService）
+
+- `deletePackageAsUser`（18169 行）：`isUserRestricted(userId, DISALLOW_UNINSTALL_APPS)`
+  → 直接返回 `DELETE_FAILED_USER_RESTRICTED`；`isUserRestricted`（13304–13311 行）
+  经 `UserManager.getUserRestrictions(userId)` 查**目标用户**的限制，与调用方身份无关
+  → **`adb shell pm uninstall`（shell uid）同样被拒**，仅 root 可绕过（root 可改限制）。
+- `isSuspendAllowedForUser`（13661–13665 行）：无 DISALLOW_APPS_CONTROL 而有
+  DISALLOW_UNINSTALL_APPS 时，普通调用方的 **停用/挂起应用** 同样被拒
+  （DO 调用方豁免）。
+- 结论：目录里的 `no_uninstall_apps` 一项就是最强防卸载手段（系统级、全应用生效），
+  v1.7 将其改名「防卸载（禁止卸载应用）」并升级描述；不采用 `setUninstallBlocked`
+  ≤（单应用 API）：Dhizuku 契约未覆盖该事务码，且语义弱于本限制（无法保护 Dhizuku 自身）。
+
+### 20.4 实现（versionCode 8 / versionName 1.7）与收尾
+
+- `RestrictionCatalog.kt`：
+  - 新增 `DISALLOW_BLUETOOTH` 行「蓝牙锁定（服务级冻结）」（网络组，紧邻
+    “禁蓝牙配置”，后者说明文案标注“界面级”并与前者分工）；
+  - 「禁卸载应用」→「防卸载（禁止卸载应用）」，描述含 adb 拦截与“先关闭再卸载”提示；
+  - 类注释补充 no_bluetooth 服务级证据行号。
+- `MainActivity.kt.buildRestrictionsPage`：页首加两条提示（控制中心磁贴不查限制的
+  根因 + 蓝牙/WiFi 的不同拦截路径与互斥提示）。
+- 顺手修正 v1.4 遗留的过期文案两处：
+  - 应用锁状态行「离开应用 10 分钟内重进免验证」→「严格模式：每次离开后重进都需验证」
+    （v1.4 改严格模式时此行漏改）；
+  - 使用说明能力表「10 分钟免重验」同因。
+- 使用说明 §6/§9（FAQ 3 行）、根 README 特性表、WifiLock/README 限制管理节
+  （22→23 项）同步。
+- 仓库描述同步改「23 项」。发布：Release v1.7（tag），附 APK + zip。
+- 决策记录（需求方拍板）：互斥维持不变；蓝牙只做限制冻结（不做看门狗扩展）。
+
+### 20.5 验证边界（未做实机回归，需需求方在 realme UI 2.0 验证）
+
+- 「蓝牙锁定」开启后控制中心切蓝牙应无效（卡在原状态，磁贴可能有短暂"正在打开"残影
+  ——SystemUI 乐观更新所致，服务拒绝后状态回读会复位）；
+- 「防卸载」开启后：设置内卸载/停用应被拒；`adb shell pm uninstall <本应用或任意应用>`
+  预期报 "DELETE_FAILED_USER_RESTRICTED"（failure 码）；
+- 解锁路径：回限制管理页关闭对应开关即可（Dhizuku 通道解除实时生效）。
 
 ---
 
 *本文档由前期开发过程回溯整理；所有外部库 API 语义均以 sources jar / AOSP 官方源码核对过（核对明细见 §6 各条）。
 接手者遇本表未覆盖的报错，优先复现 §7.2 的排查方法（错误文案 → 权威源码 grep → 链逐节点读实现）。*
-
-

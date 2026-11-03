@@ -463,6 +463,17 @@ class MainActivity : Activity() {
         }
         box.addView(restrictStatusText)
 
+        box.addView(TextView(this).apply {
+            textSize = 12f
+            setTextColor(0xFF556655.toInt())
+            setPadding(0, 0, 0, dp(8))
+            text = "提示：系统“设置”会遵守这些限制，但控制中心（下拉快捷面板）的开关" +
+                "磁贴从不检查限制（原生 SystemUI 即如此，厂商定制控制中心同理）——\n" +
+                "· 蓝牙：用「蓝牙锁定（服务级冻结）」可彻底锁死（系统服务层面拒绝开/关）；\n" +
+                "· WiFi：限制只能灰化“设置”，控制中心仍可能切换成功（WiFi 服务层无拦截）。" +
+                "如需防切换，请用路线 2 看门狗（与限制互斥，见主页）。"
+        })
+
         for (section in RestrictionCatalog.sections) {
             sectionTitle(box, section.title)
             for (item in section.items) {
@@ -1110,9 +1121,9 @@ class MainActivity : Activity() {
 
         // —— 应用锁设置页 ——
         securityStatusText?.text = if (PinManager.isEnabled(this)) {
-            "状态：已启用（离开应用 10 分钟内重进免验证）"
+            "状态：已启用（严格模式：每次离开应用后，重新进入都要验证 PIN）"
         } else {
-            "状态：未启用。启用后进入应用（或超时重进）需输入 PIN；" +
+            "状态：未启用。启用后每次进入应用都需输入 PIN；" +
                 "忘记 PIN 可用电脑脚本 tools/pin_reset.py 离线重置。"
         }
     }

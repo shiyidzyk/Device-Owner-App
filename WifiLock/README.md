@@ -83,14 +83,14 @@ adb shell dpm set-device-owner com.rosan.dhizuku/.server.DhizukuDAReceiver  # Dh
 - 一台设备只能有一个 Device Owner；Dhizuku 需 v2.13.0+（v8 协议）。
 - Dhizuku 模式要求先向 Dhizuku App 申请本应用授权。
 
-## 限制管理（v1.2 新增，企业 MDM 常用清单）
+## 限制管理（v1.2 新增，v1.7 达 23 项；企业 MDM 常用清单）
 
 主页「🧰 限制管理」进入：网络 / 应用 / 系统与安全 / 外设与数据 / 硬件与媒体
-五组共 22 项系统级管控（蓝牙配置、热点、飞行模式、装/卸应用、未知来源、
-USB 调试、安全模式、恢复出厂、添加用户、日期时间、USB 文件传输、外部介质
-挂载、跨资料剪贴板、打印、相机、麦克风开关锁定、多媒体、截屏等），全部经
-`addUserRestriction`（截屏为 `setScreenCaptureDisabled`）下发，三种授权通道复用，
-开关状态实时读取自系统，解除即回本页关闭。
+五组共 23 项系统级管控（蓝牙配置、**蓝牙服务级锁定**、热点、飞行模式、装/卸应用
+（**防卸载**）、未知来源、USB 调试、安全模式、恢复出厂、添加用户、日期时间、
+USB 文件传输、外部介质挂载、跨资料剪贴板、打印、相机、麦克风开关锁定、多媒体、
+截屏等），全部经 `addUserRestriction`（截屏为 `setScreenCaptureDisabled`）下发，
+三种授权通道复用，开关状态实时读取自系统，解除即回本页关闭。
 
 - 需要**路线 1**（本 App 或 Dhizuku 为 Device Owner）授权；路线 2（Shizuku 看门狗）
   仅覆盖 WiFi 强制开回，与本页无关。
@@ -101,6 +101,15 @@ USB 调试、安全模式、恢复出厂、添加用户、日期时间、USB 文
   本清单不含这三条；`DISALLOW_OUTGOING_CALLS / DISALLOW_SMS` 仅对托管资料生效，亦未收录。
 - “禁相机”使用的 `no_camera` 是隐藏常量（SDK 不导出）；Android 12 起“禁用麦克风”
   API 已移除，本页提供的是 `DISALLOW_MICROPHONE_TOGGLE`（麦克风隐私开关锁定）。
+- **v1.7 重点（AOSP R 源码逐行核实）**：
+  - `no_bluetooth`（蓝牙锁定·服务级冻结）是唯一能拦住“控制中心磁贴切蓝牙”的手段——
+    `BluetoothManagerService.enable()/disable()` 直接拒绝（源码 1054/1088 行）；
+  - 控制中心磁贴本身**不检查任何用户限制**（SystemUI WifiTile/BluetoothTile 直接调开/关），
+    WiFi 因无服务级检查只能在“设置”里灰化（`no_config_wifi` 在 WiFi 服务层仅守卫
+    “恢复出厂”）——防切换仍需路线 2 看门狗；
+  - `no_uninstall_apps`（防卸载）在 `PackageManagerService.deletePackageAsUser` 统一
+    拒绝（源码 18169 行），检查的是用户限制而非调用方——连 `adb shell pm uninstall`
+    都会失败，仅 root 可绕过；“停用/挂起应用”亦被拒（isSuspendAllowedForUser）。
 
 ## 应用锁（v1.3 新增，v1.4 改严格模式：PIN 码 + 离线重置）
 
