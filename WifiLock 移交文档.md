@@ -694,5 +694,76 @@ status/wipe[两步]）→ 调 `PolicyController` 现有通道执行 → 回执�
 
 ---
 
+## 21. 第九阶段迭代（2026-11-03）：单应用防卸载「仅本应用」（versionCode 9 / versionName 1.8）
+
+### 21.1 需求变更与方案反转记录
+
+- 需求方澄清（拍板）："防卸载"指**在不影响其他软件正常卸载的前提下，让本软件自身不被
+  手动卸载**——即 v1.7 的「全应用统一拒绝」语义不符合预期（它会拦下所有应用的卸载）。
+- 因此反转 §20.3 的判定「不采用 `setUninstallBlocked`」：该判定给出的两条理由
+  （① Dhizuku 契约未覆盖该事务码；② 单应用语义弱于全量限制、无法保护 Dhizuku 自身）
+  在新约束下均不成立——新约束恰好要求"其他应用可正常卸载"，全量限制才是违反者；
+  ② 通过把 Dhizuku 代理加进保护列表解决。
+- 条目布局：新增「防卸载（仅本应用）」（**推荐日常选项**）；v1.7 的全量项改名
+  「防卸载（全部应用）」，描述标注"⚠️ 影响所有应用的正常卸载，慎用"，仅在需要
+  彻底锁死整台设备时使用。两者并存于"应用"组。
+
+### 21.2 技术路线（DPM 公开 API，不动 AIDL 精密件）
+
+- 走 `DevicePolicyManager.setUninstallBlocked(admin, packageName, enable)`
+  / `isUninstallBlocked(admin, packageName)`（API 21+，Device Owner / Profile Owner
+  专属，公开 SDK API）。不动任何用户限制；与 DISALLOW_UNINSTALL_APPS 互不干扰。
+- 三通道分发（`PolicyController.setUninstallSelfBlocked` / `isUninstallSelfBlocked`）：
+  - **DIRECT**：直调本应用 AdminReceiver 的 DPM。
+  - **DHIZUKU（Android ≤14，含 realme UI 2.0 / ColorOS 11.1）**：复用 v1.2 的
+    `withDhizukuDpm` 老契约重放机制（mService 热替换 + 平台公共 API）——该机制按
+    方法逐个经 Dhizuku 转发，天然覆盖本 API，**无需修改 IDevicePolicyManager.aidl
+    精密件**（仍只有 setUserRestriction=134 / getUserRestrictions=138 两个真实声明）。
+  - **DHIZUKU（Android 15+）**：Dhizuku 新契约只适配了用户限制读写两事务码，
+    该 API 事务码不在契约内 → 主动抛 `IllegalStateException` 提示改用直连 owner
+    或全量限制（与 v1.7 禁截屏同策略）。
+- 保护范围 `uninstallProtectedPackages()`：本应用包名恒在；DHIZUKU 模式下连同
+  `com.rosan.dhizuku` 一起锁定——**否则用户先卸掉 Dhizuku 代理防线即刻失效**
+  （把 §20.3"无法保护 Dhizuku 自身"的缺陷正向补齐）。设置时逐包下发，解除即逐包放开。
+
+### 21.3 源码取证（AOSP R PackageManagerService，aosp-mirror android-11.0.0_r1）
+
+- `deletePackageAsUser` **18180 行**：`getBlockUninstallForUser` 单应用 block 检查
+  → 返回 `DELETE_FAILED_OWNER_BLOCKED`。该检查**与调用方无关**（设置/应用商店/
+  `adb pm uninstall` 一律被拒），仅 root 可绕过。
+- 对照 v1.7 取证：全量限制在 **18169 行**（`DELETE_FAILED_USER_RESTRICTED`）；
+  `isSuspendAllowedForUser` **13661 行**（全量限制连带拒"停用/挂起应用"）。
+- 结论：单应用 block 的拦截点在包管理器删除流程统一入口，防护强度与全量限制
+  相同（连 adb 都进不来），只是作用域精确到被锁的包——正是"仅本应用"所需语义。
+
+### 21.4 实现（RestrictionCatalog / MainActivity）
+
+- `RestrictionCatalog.kt`：新增 `SPECIAL_UNINSTALL_SELF = "uninstall_self"` 常量与
+  「防卸载（仅本应用）」条目（特殊型，`key = null`，第二个 special 条目）；全量项
+  改名「防卸载（全部应用）」并重写描述；类注释补充两条 special 条目的语义边界说明。
+- `MainActivity.kt`：限制页开关**下发**由 `if (special == SCREEN_CAPTURE)` 改为
+  `when (item.special)` 三分支（SCREEN_CAPTURE / UNINSTALL_SELF / 其余为用户限制）；
+  **状态读取**同构三分支；置灰判定从"仅禁截屏"推广为
+  `special != null && DHIZUKU && SDK_INT >= 35`（两个单应用级 API 都在 15+ 契约外）。
+- `PolicyController.kt`：如 21.2 所述新增一对读写方法；`isUninstallSelfBlocked`
+  仅读本应用包的状态。
+- `app/build.gradle`：versionCode 9 / versionName "1.8"。
+
+### 21.5 文档四处同步与验证边界
+
+- 根 README 特性表 23→24 项并拆两条防卸载行；WifiLock/README 限制管理节标题计
+  24 项 + 新增 v1.8 bullet（含 PMS 18180 行证据）；使用说明 §6 表格行、"两条重点限制"
+  扩为"三条重点限制"、§9 FAQ 防卸载行重写；本节即移交记录。
+- 验证清单（需求方在 realme UI 2.0 实测）：
+  1. 开「防卸载（仅本应用）」后，设置内对**本应用**卸载应被拒（提示"已被管理员/组织
+     停用"类文案）；`adb shell pm uninstall com.example.wifilock` 预期失败；
+  2. **其他应用**（任选系统应用或第三方）应照常可卸载——这是本版本的核心验收点；
+  3. Dhizuku 模式下 `com.rosan.dhizuku` 也应无法卸载（走设置卸载入口验证）；
+  4. 解除路径：回限制管理页关闭开关，随后本应用应可正常卸载；
+  5. 状态读取：App 内开关与系统实测一致（关掉 App 重进不回跳）。
+- 决策记录（需求方拍板）：路线 1/2 互斥维持不变（§19 结论）；蓝牙仍只做限制冻结。
+
+---
+
 *本文档由前期开发过程回溯整理；所有外部库 API 语义均以 sources jar / AOSP 官方源码核对过（核对明细见 §6 各条）。
 接手者遇本表未覆盖的报错，优先复现 §7.2 的排查方法（错误文案 → 权威源码 grep → 链逐节点读实现）。*

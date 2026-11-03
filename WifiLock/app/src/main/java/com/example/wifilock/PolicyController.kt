@@ -279,4 +279,66 @@ class PolicyController(private val context: Context) {
     } catch (_: Throwable) {
         false
     }
+
+    // ------------------------------------------------------------------
+    // 防卸载（DPM 单应用 API setUninstallBlocked / isUninstallBlocked，API 21+，
+    // Device Owner/Profile Owner 专属）。仅锁目标包的卸载入口，不动任何用户限制——
+    // 其他应用的正常卸载（设置/商店/adb）不受影响。
+    // ------------------------------------------------------------------
+
+    /** 需要保护的包：本应用恒在；Dhizuku 模式下连同代理本身（否则代理被卸后防线失效） */
+    private fun uninstallProtectedPackages(): List<String> {
+        val list = mutableListOf(context.packageName)
+        if (detectMode() == Mode.DHIZUKU && dhizukuInstalled()) {
+            list.add(dhizukuPackage)
+        }
+        return list
+    }
+
+    /** 设置/解除「目标应用不可卸载」；Dhizuku 老契约（Android ≤14）经平台公共 API 重放，
+     *  新契约（Android 15+，Dhizuku 契约未覆盖该方法）主动抛错提示，与禁截屏同策略 */
+    fun setUninstallSelfBlocked(enable: Boolean) {
+        when (detectMode()) {
+            Mode.DIRECT -> {
+                val dpm = directDpm()
+                for (pkg in uninstallProtectedPackages()) {
+                    dpm.setUninstallBlocked(directAdmin, pkg, enable)
+                }
+            }
+            Mode.DHIZUKU -> {
+                if (isDhizukuNewContract()) {
+                    throw IllegalStateException(
+                        "Dhizuku 代理在 Android 15+ 仅适配了用户限制读写；" +
+                            "单应用防卸载请改用直连 owner 模式，或先用「防卸载（全部应用）」限制"
+                    )
+                }
+                withDhizukuDpm { dpm, owner ->
+                    for (pkg in uninstallProtectedPackages()) {
+                        dpm.setUninstallBlocked(owner, pkg, enable)
+                    }
+                }
+            }
+            Mode.NONE -> throw IllegalStateException("尚未取得管理权限，请先完成授权")
+        }
+    }
+
+    /** 读取当前本应用是否已被禁卸载（状态实时，解除即 false） */
+    fun isUninstallSelfBlocked(): Boolean = try {
+        when (detectMode()) {
+            Mode.DIRECT ->
+                directDpm().isUninstallBlocked(directAdmin, context.packageName)
+            Mode.DHIZUKU -> {
+                if (isDhizukuNewContract()) {
+                    false // 契约未适配
+                } else {
+                    withDhizukuDpm { dpm, owner ->
+                        dpm.isUninstallBlocked(owner, context.packageName)
+                    }
+                }
+            }
+            Mode.NONE -> false
+        }
+    } catch (_: Throwable) {
+        false
+    }
 }

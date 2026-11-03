@@ -13,10 +13,16 @@ import android.os.UserManager
  *
  * special = SCREEN_CAPTURE 的条目不是用户限制，而是 DPM 公开 API
  * `setScreenCaptureDisabled`（Android 15+ 的 Dhizuku 代理未适配该契约，UI 侧按需禁用）。
+ * special = UNINSTALL_SELF 的条目同理是 DPM 公开 API `setUninstallBlocked`
+ * （API 21+，DO/PO 专属；单应用级，不动任何用户限制——与本项之外的
+ * DISALLOW_UNINSTALL_APPS 全量限制语义不同，勿混淆）。
  */
 object RestrictionCatalog {
 
     const val SPECIAL_SCREEN_CAPTURE = "screen_capture"
+
+    /** 防卸载（仅目标应用）：DPM 单应用 API setUninstallBlocked，读取用 isUninstallBlocked */
+    const val SPECIAL_UNINSTALL_SELF = "uninstall_self"
 
     class Item(
         /** UserManager.DISALLOW_*；为 null 时看 special */
@@ -50,13 +56,20 @@ object RestrictionCatalog {
         )),
         Section("应用", listOf(
             Item(UserManager.DISALLOW_INSTALL_APPS, "禁安装应用", "无法安装任何新应用"),
+            // DPM 单应用 API setUninstallBlocked：仅锁目标包，其他应用照常可卸载。
+            // R PackageManagerService.deletePackageAsUser 18180 行 getBlockUninstallForUser
+            // 统一拦截（与调用方无关，连 adb pm uninstall 也返回 DELETE_FAILED_OWNER_BLOCKED）。
+            // Dhizuku 模式下同时锁定 Dhizuku 代理本身——否则代理被卸后整条防线失效。
+            Item(null, "防卸载（仅本应用）",
+                "只锁本应用的卸载入口（Dhizuku 模式连同 Dhizuku 代理一起保护），其他应用照常可卸载。设置/商店/adb 的卸载入口均被系统拒绝；想卸载前先回本页关闭",
+                SPECIAL_UNINSTALL_SELF),
             // PMS.deletePackageAsUser 对该限制统一拒绝（DELETE_FAILED_USER_RESTRICTED，
             // R 源码 PackageManagerService 18169 行）；isUserRestricted 检查的是目标用户的
             // 限制而非调用方身份——因此连 `adb shell pm uninstall`（shell 权限）都会失败，
             // 仅 root 可绕过。同限制还令普通调用方的“停用/挂起应用”被拒
             // （PMS isSuspendAllowedForUser 同步检查 DISALLOW_UNINSTALL_APPS）。
-            Item(UserManager.DISALLOW_UNINSTALL_APPS, "防卸载（禁止卸载应用）",
-                "所有已装应用不可卸载/停用（含本应用与 Dhizuku）。系统在包管理器层面直接拦截，连 adb uninstall 也会失败；想卸载任何应用前先关闭本项"),
+            Item(UserManager.DISALLOW_UNINSTALL_APPS, "防卸载（全部应用）",
+                "所有已装应用不可卸载/停用（含本应用与 Dhizuku）。⚠️ 影响所有应用的正常卸载，日常管理请用上面的「仅本应用」"),
             Item(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES, "禁未知来源", "无法从侧载渠道安装应用")
         )),
         Section("系统与安全", listOf(

@@ -486,10 +486,13 @@ class MainActivity : Activity() {
                     setOnCheckedChangeListener { _, checked ->
                         if (!uiRefreshed) return@setOnCheckedChangeListener
                         try {
-                            if (item.special == RestrictionCatalog.SPECIAL_SCREEN_CAPTURE) {
-                                controller.setScreenCaptureDisabled(checked)
-                            } else {
-                                controller.setRestriction(item.key!!, checked)
+                            val special = item.special
+                            when (special) {
+                                RestrictionCatalog.SPECIAL_SCREEN_CAPTURE ->
+                                    controller.setScreenCaptureDisabled(checked)
+                                RestrictionCatalog.SPECIAL_UNINSTALL_SELF ->
+                                    controller.setUninstallSelfBlocked(checked)
+                                null -> controller.setRestriction(item.key!!, checked)
                             }
                             toast(if (checked) "已启用：${item.title}" else "已解除：${item.title}")
                         } catch (t: Throwable) {
@@ -1107,14 +1110,15 @@ class MainActivity : Activity() {
             for ((item, sw) in restrictionSwitches) {
                 uiRefreshed = false
                 sw.isEnabled = mode != PolicyController.Mode.NONE &&
-                    !(item.special == RestrictionCatalog.SPECIAL_SCREEN_CAPTURE &&
+                    !(item.special != null &&
                         mode == PolicyController.Mode.DHIZUKU && Build.VERSION.SDK_INT >= 35)
-                sw.isChecked =
-                    if (item.special == RestrictionCatalog.SPECIAL_SCREEN_CAPTURE) {
+                sw.isChecked = when (item.special) {
+                    RestrictionCatalog.SPECIAL_SCREEN_CAPTURE ->
                         controller.isScreenCaptureDisabled()
-                    } else {
-                        snapshot?.getBoolean(item.key!!) ?: false
-                    }
+                    RestrictionCatalog.SPECIAL_UNINSTALL_SELF ->
+                        controller.isUninstallSelfBlocked()
+                    else -> snapshot?.getBoolean(item.key!!) ?: false
+                }
                 uiRefreshed = true
             }
         }
