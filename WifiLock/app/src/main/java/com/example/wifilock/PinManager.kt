@@ -181,7 +181,9 @@ object PinManager {
         val d = deriveScalar(ctx)
         val g = Pt(P256.GX, P256.GY)
         // 自检：实现正确性由 NIST 2G 向量背书；失败直接抛错而不是给出坏钥
-        val self = ptMul(BigInteger.TWO, g)
+        // BigInteger.TWO 是 JDK 9 才加入的常量，Android 运行时核心库没有
+        //（API 30 realme UI 2.0 实测 NoSuchFieldError 直接崩溃），必须用 valueOf(2)
+        val self = ptMul(BigInteger.valueOf(2), g)
         if (self.x != P256.TWO_G_X || self.y != P256.TWO_G_Y) {
             throw IllegalStateException("重置密钥模块自检失败（P-256 点乘与标准向量不符）")
         }

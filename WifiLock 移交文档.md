@@ -765,5 +765,52 @@ status/wipe[两步]）→ 调 `PolicyController` 现有通道执行 → 回执�
 
 ---
 
+## 22. 第十阶段热修复（2026-11-14）：设置 PIN 崩溃（versionCode 10 / versionName 1.8.1）
+
+### 22.1 现象与根因（问题手机实机定位）
+
+- 现象（需求方报障，问题手机已连 adb）：主页「应用锁」→ 输入新 PIN → 点「启用应用锁」
+  必崩退出。
+- crash 缓冲区取证：
+  `java.lang.NoSuchFieldError: No static field TWO of type Ljava/math/BigInteger;`
+  at `PinManager.resetKey(PinManager.kt:184)`——即 `ptMul(BigInteger.TWO, g)` 一行
+  （P-256 点乘的 NIST 2G 自检向量计算）。
+- 根因：`BigInteger.TWO` 是 **JDK 9 才加入的静态常量**，编译期在 SDK 36 classpath
+  可见所以能编译通过；Android 运行时核心库没有该字段 → 首次走到 `resetKey` 的路径
+  （启用 PIN、修改 PIN、忘记 PIN 申请码生成——所有涉及密钥派生的入口）全部必崩。
+  该代码为 v1.5（§18）引入的确定性派生自检；当时实机验证未覆盖"启用"链路，
+  属验证边界疏漏。受影响版本：v1.5–v1.8 全部。
+
+### 22.2 修复
+
+- `PinManager.kt`：`BigInteger.TWO` → `BigInteger.valueOf(2)`（原行为、自检向量、
+  派生结果完全不变，仅 API 兼容性修正；注释写明缘由防回退）。
+- `MainActivity.kt`：「启用应用锁」「确认修改」两处 `setPin` 调用包 try/catch——
+  失败 toast 提示并保持未加锁原状态（防止同类底层异常再次直接崩页面）。
+- `app/build.gradle`：versionCode 10 / versionName "1.8.1"。
+- 全项目 grep 确认无其他 JDK 9+ 的 `BigInteger.TWO/THREE/TEN` 用法。
+
+### 22.3 实机验证（realme UI 2.0，问题手机 6bd8062a）
+
+1. 启用 PIN（1234）：正常显示"⚠️ 重置私钥（设备绑定，只显示这一次！）"并导出
+   `WFLKEY2-…` 全 64 hex 私钥（旧版正是崩在这步），无 FATAL；
+2. 严格模式门禁：离开应用重进 → 数字键盘 PIN 门禁页出现，输入 1234 验证通过回主页；
+3. 关闭应用锁：输入当前 PIN → `run-as` 读 prefs 确认 `pin_lock.xml` 清空
+   （enabled 记录移除），状态回"未启用"，与启用前一致；
+4. 全流程 crash 缓冲区无任何 wifilock 记录。
+
+### 22.4 附带事项（本轮构建环境排障记录）
+
+- 修复过程中发现 Temp 构建工具链的 `build\tools\jdk21` 目录**内容已被系统清理机制
+  替换为 JDK 25.0.3**（目录名与实际版本不符，`release` 文件缺失）——表现为
+  Gradle 8.9 守护进程 JVM 上下文不匹配、脚本编译期
+  "Unsupported class file major version 69"（Groovy 内嵌 ASM 解析不了 JDK 25 类文件）。
+  已重新下载微软官方 **JDK 21.0.13.0.2** 按原路径恢复（gradle.properties 的
+  `org.gradle.java.home` 指向重新有效）。**接手者注意**：遇到上述两类报错，先核对
+  `build\tools\jdk21\release` 的 `JAVA_VERSION` 是否名副其实（目录名不可信）；
+  机器系统 PATH 上的 JDK 25 与 Gradle 8.x 不兼容，构建必须走该 jdk21 目录。
+
+---
+
 *本文档由前期开发过程回溯整理；所有外部库 API 语义均以 sources jar / AOSP 官方源码核对过（核对明细见 §6 各条）。
 接手者遇本表未覆盖的报错，优先复现 §7.2 的排查方法（错误文案 → 权威源码 grep → 链逐节点读实现）。*

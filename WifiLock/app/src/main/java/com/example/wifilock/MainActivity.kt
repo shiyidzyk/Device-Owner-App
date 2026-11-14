@@ -693,28 +693,33 @@ class MainActivity : Activity() {
                         toast("两次输入不一致")
                         return@setOnClickListener
                     }
-                    val once = PinManager.setPin(this@MainActivity, a)
-                    if (securityOnceKey == null) {
-                        securityOnceKey = TextView(this@MainActivity).apply {
-                            textSize = 12f
-                            setTextIsSelectable(true)
-                            setPadding(0, dp(10), 0, 0)
+                    try {
+                        val once = PinManager.setPin(this@MainActivity, a)
+                        if (securityOnceKey == null) {
+                            securityOnceKey = TextView(this@MainActivity).apply {
+                                textSize = 12f
+                                setTextIsSelectable(true)
+                                setPadding(0, dp(10), 0, 0)
+                            }
+                            box.addView(securityOnceKey)
                         }
-                        box.addView(securityOnceKey)
+                        securityOnceKey?.text = if (once.isEmpty()) {
+                            "已启用（沿用既有重置私钥）"
+                        } else {
+                            "⚠️ 重置私钥（设备绑定，只显示这一次！）：\n\n$once\n\n" +
+                                "请立即复制保存到电脑 tools/pin_reset.py 同目录的 " +
+                                "wifilock_reset_private.key（纯文本）。\n" +
+                                "它由设备标识派生：之后反复开关应用锁、重装应用、清除数据都不会变；" +
+                                "仅恢复出厂会随系统更换。\n" +
+                                "用途：忘记 PIN 时离线重置。丢失 PIN 且丢失私钥 = 只能恢复出厂。"
+                        }
+                        PinManager.markUnlocked()
+                        refresh()
+                        toast("应用锁已启用")
+                    } catch (t: Throwable) {
+                        // 密钥派生/自检失败时不启用（保持未加锁原状态），提示而非崩溃
+                        toast("启用失败：${t.message}")
                     }
-                    securityOnceKey?.text = if (once.isEmpty()) {
-                        "已启用（沿用既有重置私钥）"
-                    } else {
-                        "⚠️ 重置私钥（设备绑定，只显示这一次！）：\n\n$once\n\n" +
-                            "请立即复制保存到电脑 tools/pin_reset.py 同目录的 " +
-                            "wifilock_reset_private.key（纯文本）。\n" +
-                            "它由设备标识派生：之后反复开关应用锁、重装应用、清除数据都不会变；" +
-                            "仅恢复出厂会随系统更换。\n" +
-                            "用途：忘记 PIN 时离线重置。丢失 PIN 且丢失私钥 = 只能恢复出厂。"
-                    }
-                    PinManager.markUnlocked()
-                    refresh()
-                    toast("应用锁已启用")
                 }
             })
         } else {
@@ -741,10 +746,14 @@ class MainActivity : Activity() {
                         toast("两次输入不一致")
                         return@setOnClickListener
                     }
-                    PinManager.setPin(this@MainActivity, n)
-                    PinManager.markUnlocked()
-                    toast("PIN 已修改（重置私钥不变）")
-                    navigate(PAGE_HOME)
+                    try {
+                        PinManager.setPin(this@MainActivity, n)
+                        PinManager.markUnlocked()
+                        toast("PIN 已修改（重置私钥不变）")
+                        navigate(PAGE_HOME)
+                    } catch (t: Throwable) {
+                        toast("修改失败：${t.message}")
+                    }
                 }
             })
 

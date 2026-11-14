@@ -128,6 +128,9 @@ adb shell dpm set-device-owner com.rosan.dhizuku/.server.DhizukuDAReceiver  # Dh
 - **防爆破**：连续错 5 次进入指数锁定（30 秒起，最长 30 分钟）；
 - PIN 以「16B 随机盐 + 5 万次迭代 SHA-256」存储，不存明文；
 - **修改 PIN** 复用同一重置私钥（已保存的私钥继续有效）；**关闭应用锁**会连私钥记录一并清除。
+- **v1.8.1 修复**：设置/修改 PIN 必崩（`BigInteger.TWO` 是 JDK 9 才有的常量，Android 运行时
+  核心库没有该字段 → `NoSuchFieldError`，P-256 密钥派生自检处触发）；改用 `valueOf(2)`，
+  自检逻辑与密钥语义不变，已在 realme UI 2.0（API 30）实测启用 / 门禁 / 关闭全流程通过。
 
 ### 忘记 PIN：纯离线挑战-应答重置
 
